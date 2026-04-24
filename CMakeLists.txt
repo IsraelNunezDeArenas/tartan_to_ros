@@ -29,6 +29,7 @@ install(
     src/tartanground_node_ekf.py
     src/tartanground_node_ekf2.py
     src/tartanground_debug.py
+    src/map_tartanground_CC.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
