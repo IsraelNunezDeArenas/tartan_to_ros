@@ -525,6 +525,9 @@ class TartanGroundTFPublisher(Node):
             f'{base}/gyro.npy',     f'{base}/gyro.txt')
         self.acc    = self._load(
             f'{base}/acc.npy', f'{base}/acc.txt')
+        self.acc_nograv    = self._load(
+            f'{base}/acc_nograv.npy', f'{base}/acc_nograv.txt')
+
         self.get_logger().info(
             f"Cargados {len(self.vel_body)} pasos de vel_body + gyro "
             f"(GT derivado, usado como odometría).")
@@ -847,22 +850,18 @@ class TartanGroundTFPublisher(Node):
         vx, vy, vz = v
         return np.array([vy, vx, -vz])
 
-    def _publish_odom(self):
-        if self.idx >= len(self.acc_data):
-            return
-
-        now = self.get_clock().now().to_msg()
+    def _publish_odom(self,tstamp,idx):
 
         # ── IMU ───────────────────────────────────────────────────
-        raw = self.acc_data[self.idx]       # [ax, ay, az] NED body CON gravedad
-        gyr = self.gyro_data[self.idx]      # [wx, wy, wz] NED body
+        raw = self.acc[idx]       # [ax, ay, az] NED body CON gravedad
+        gyro = self.gyro[idx]      # [wx, wy, wz] NED body
 
-        ax, ay, az = self.ned_body_to_enu_body(*raw)
-        wx, wy, wz = self.ned_body_to_enu_body(*gyr)
+        ax, ay, az = self.ned_to_enu_position(*raw)
+        wx, wy, wz = self.ned_to_enu_position(*gyro)
 
         imu = Imu()
-        imu.header.stamp    = now
-        imu.header.frame_id = 'base_link'
+        imu.header.stamp    = tstamp
+        imu.header.frame_id = self.robot_frame
 
         imu.linear_acceleration.x = ax
         imu.linear_acceleration.y = ay
@@ -888,14 +887,13 @@ class TartanGroundTFPublisher(Node):
 
         self.imu_pub.publish(imu)
 
-        # ── Odometry (desde vel_body) ─────────────────────────────
-        vb = self.vel_body_data[self.idx]   # [vx, vy, vz] NED body
-        vx, vy, vz = self.ned_body_to_enu_body(*vb)
+        vb = self.vel_body[idx]   # [vx, vy, vz] NED body
+        vx, vy, vz = self.ned_to_enu_position(*vb)
 
         odom = Odometry()
-        odom.header.stamp    = now
+        odom.header.stamp    = tstamp
         odom.header.frame_id = 'odom'
-        odom.child_frame_id  = 'base_link'
+        odom.child_frame_id  = self.robot_frame
 
         # Solo twist (velocidad); la pose la estima el EKF
         odom.twist.twist.linear.x  = vx
@@ -915,7 +913,6 @@ class TartanGroundTFPublisher(Node):
         ]
 
         self.odom_pub.publish(odom)
-        self.idx += 1
 
 
 
@@ -1177,6 +1174,8 @@ class TartanGroundTFPublisher(Node):
         robot_ps  = self._make_pose_stamped(robot_tf_GT)
         
         self.robot_pose_pub.publish(robot_ps)
+
+        self._publish_odom(now,frame)
 
         # accel_ned = self.acc[frame]
         # accel_enu = self.ned_to_enu_vector(accel_ned)
