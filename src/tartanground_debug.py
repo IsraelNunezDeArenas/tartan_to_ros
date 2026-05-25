@@ -11,7 +11,7 @@ from geometry_msgs.msg import TransformStamped, PoseStamped, PoseArray, PoseWith
 from nav_msgs.msg import Path, Odometry
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 from builtin_interfaces.msg import Time
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Empty
 import time
 from sensor_msgs.msg import PointCloud2, PointField, Image, LaserScan, Imu  
 import sensor_msgs_py.point_cloud2 as pc2
@@ -130,29 +130,29 @@ class TartanGroundTFPublisher(Node):
         self.declare_parameter('lidar_frame_GT','lidar_GT')
         self.declare_parameter('robot_file', 'pose_body.txt')
 
-        self.dataset_path   = self.get_parameter('dataset_path').value
-        self.rate_hz        = self.get_parameter('publish_rate').value
-        self.loop      = self.get_parameter('loop').value
-        self.world_frame  = self.get_parameter('world_frame').value
+        self.dataset_path       = self.get_parameter('dataset_path').value
+        self.rate_hz            = self.get_parameter('publish_rate').value
+        self.loop               = self.get_parameter('loop').value
+        self.world_frame        = self.get_parameter('world_frame').value
 
-        self.robot_frame  = self.get_parameter('robot_frame').value
-        self.camera_frame = self.get_parameter('camera_frame').value
+        self.robot_frame        = self.get_parameter('robot_frame').value
+        self.camera_frame       = self.get_parameter('camera_frame').value
 
-        self.robot_frame_GT  = self.get_parameter('robot_frame_GT').value
-        self.camera_frame_GT = self.get_parameter('camera_frame_GT').value
+        self.robot_frame_GT     = self.get_parameter('robot_frame_GT').value
+        self.camera_frame_GT    = self.get_parameter('camera_frame_GT').value
 
-        cam_file       = self.get_parameter('camera_file').value
-        robot_file     = self.get_parameter('robot_file').value
-        self.lidar_frame = self.get_parameter('lidar_frame').value
+        cam_file                = self.get_parameter('camera_file').value
+        robot_file              = self.get_parameter('robot_file').value
+        self.lidar_frame        = self.get_parameter('lidar_frame').value
 
-        self.rgb_path    = os.path.join(self.dataset_path, 'image_lcam_front')
-        self.depth_path  = os.path.join(self.dataset_path, 'depth_lcam_front')
-        self.lidar_path  = os.path.join(self.dataset_path, 'lidar')
+        self.rgb_path           = os.path.join(self.dataset_path, 'image_lcam_front')
+        self.depth_path         = os.path.join(self.dataset_path, 'depth_lcam_front')
+        self.lidar_path         = os.path.join(self.dataset_path, 'lidar')
 
        
-        self.rgb_files   = sorted(os.listdir(self.rgb_path))
-        self.depth_files = sorted(os.listdir(self.depth_path))
-        self.lidar_files = sorted(os.listdir(self.lidar_path))
+        self.rgb_files          = sorted(os.listdir(self.rgb_path))
+        self.depth_files        = sorted(os.listdir(self.depth_path))
+        self.lidar_files        = sorted(os.listdir(self.lidar_path))
 
         # ────────────────────────────────────────────────────────
 
@@ -161,7 +161,6 @@ class TartanGroundTFPublisher(Node):
             raise SystemExit(1)
 
         self.bridge = CvBridge()
-
 
         # ── Cargar poses ────────────────────────────────────────────────────
 
@@ -234,6 +233,8 @@ class TartanGroundTFPublisher(Node):
      
         self.imu_pub = self.create_publisher(Imu, '/imu/data_raw', 10)
 
+        self.map_published    = self.create_subscription(Empty,'map_recv',self.map_received_cb,10)
+
         qos_latched = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -249,35 +250,64 @@ class TartanGroundTFPublisher(Node):
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
 
         # ── TF estático: map → odom (identidad) ─────────────────────────────
-        # self.publish_ned_frame()
-
-        self.get_logger().info(f'SLEEP')
-        time.sleep(10.0)
  
         self.closest_times()
         self.closest_map = {imu: cam for imu, cam in self.closest_pairs}
 
         # self._publish_static_identity('odom', self.world_frame) # World -> Odom
         self._publish_initial_state()   # Base_Link -> Camera
-        self._publish_static_identity(self.lidar_frame, self.camera_frame_GT)
+
+
+        p0_robot_enu = self._pose_ned_to_pose_enu(self.robot_poses_ned[0])
+        p0_cam_enu  = self._pose_ned_to_pose_enu(self.cam_poses_ned[0])
+
+        T_cam      = self.pose_to_matrix(p0_cam_enu)
+        T_robot    = self.pose_to_matrix(p0_robot_enu)
+
+        T_base_cam = np.linalg.inv(T_robot) @ T_cam
+
+
+        tf_base_cam_GT = self.matrix_to_tf(T_base_cam, self._to_ros_time(0.0), self.robot_frame_GT, self.camera_frame_GT)
+        tf_base_cam = self.matrix_to_tf(T_base_cam, self._to_ros_time(0.0), self.robot_frame, self.camera_frame)
+
+        # Al final de __init__, DESPUÉS de calcular T_base_cam:
+        tf_base_cam_GT = self.matrix_to_tf(T_base_cam, self._to_ros_time(0.0),
+                                            self.robot_frame_GT, self.camera_frame_GT)
+        tf_base_cam    = self.matrix_to_tf(T_base_cam, self._to_ros_time(0.0),
+                                            self.robot_frame,    self.camera_frame)
+
+        tf_lidar_gt    = self._make_identity_tf(self._to_ros_time(0.0),
+                                                 self.camera_frame_GT, 'lidar_GT')
+        tf_lidar       = self._make_identity_tf(self._to_ros_time(0.0),
+                                         self.camera_frame,    self.lidar_frame)
+
+        # Una sola llamada con todo
+        self.static_tf_broadcaster.sendTransform(
+            [tf_base_cam_GT, tf_base_cam, tf_lidar_gt, tf_lidar]
+        )
 
         self.get_logger().info('✓ Nodo TartanGround TF Publisher iniciado.')
         self.get_logger().info(f'  Marcos TF: NED → {self.robot_frame} → {self.camera_frame}')
-
-        # ── Timer principal ─────────────────────────────────────────────────
-        self.timer = self.create_timer(1.0 / (10*self.rate_hz), self._timer_callback)
-
-
-
+        self.get_logger().info('Esperando mapa')
+ 
         
     # -----------------------------------------------------------------------
+
+    def map_received_cb(self,msg):
+
+        self.get_logger().info('Mapa recibido: Inciando repoducción')
+
+        self.timer = self.create_timer(1.0 / (10*self.rate_hz), self._timer_callback)
+        return
+
+
     def _publish_initial_pose(self):
 
         p0_robot_enu = self._pose_ned_to_pose_enu(self.robot_poses_ned[0])
 
         msg = PoseWithCovarianceStamped()
 
-        msg.header.stamp = self._to_ros_time(0.0)
+        msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "map"   # 🔥 SIEMPRE "map"
 
         # ── Posición ──
@@ -309,7 +339,7 @@ class TartanGroundTFPublisher(Node):
         self.get_logger().info(
             f"Publicando pose inicial")
 
-        tstamp = self._to_ros_time(0.0)
+        tstamp = self.get_clock().now().to_msg()
 
         # Transformación Base - Cámara Ground Truth t = 0 
 
@@ -323,10 +353,10 @@ class TartanGroundTFPublisher(Node):
         T_base_cam = np.linalg.inv(T_robot) @ T_cam
 
 
-        # tf_base_cam_GT = self.matrix_to_tf(T_base_cam, tstamp, 'base_link_GT',self.camera_frame)
-        tf_base_cam = self.matrix_to_tf(T_base_cam, tstamp, self.robot_frame_GT, self.camera_frame_GT)
+        tf_base_cam_GT = self.matrix_to_tf(T_base_cam, self._to_ros_time(0.0), self.robot_frame_GT, self.camera_frame_GT)
+        tf_base_cam = self.matrix_to_tf(T_base_cam, self._to_ros_time(0.0), self.robot_frame, self.camera_frame)
 
-        self.static_tf_broadcaster.sendTransform([tf_base_cam])
+        # self.static_tf_broadcaster.sendTransform([tf_base_cam_GT,tf_base_cam])
 
         # ----------------------------------------------
 
@@ -341,6 +371,14 @@ class TartanGroundTFPublisher(Node):
         self.tf_broadcaster.sendTransform([tf_init_GT])
 
         #PUBLICAR TF REAL
+
+       # ✅ Dinámica: va a /tf, AMCL la sobreescribe limpiamente
+        # ts = TransformStamped()
+        # ts.header.stamp    = self.get_clock().now().to_msg()
+        # ts.header.frame_id = self.world_frame   # map
+        # ts.child_frame_id  = 'odom'
+        # ts.transform.rotation.w = 1.0
+        # self.tf_broadcaster.sendTransform(ts)
         
         self._publish_initial_pose()        # Debug
         # ----------------------------------------------
@@ -348,17 +386,9 @@ class TartanGroundTFPublisher(Node):
 
         # Odometría - Dead Reckoning
 
-        self.position_odom_DR = np.array([p0_robot_enu[0], p0_robot_enu[1], p0_robot_enu[2]])
-        self.orientation_odom_DR= np.array([p0_robot_enu[3], p0_robot_enu[4], p0_robot_enu[5], p0_robot_enu[6]])
-
-        self.position_odom_DR_body = np.array([p0_robot_enu[0], p0_robot_enu[1], p0_robot_enu[2]])
-        self.orientation_odom_DR_body= np.array([p0_robot_enu[3], p0_robot_enu[4], p0_robot_enu[5], p0_robot_enu[6]])
-
         self.last_time = self.imu_times[0]
 
         self.current_frame += 1
-
-        time.sleep(3.0)
 
         self.get_logger().info(
             f"Pose inicial publicada")
@@ -400,7 +430,7 @@ class TartanGroundTFPublisher(Node):
         # IMU
         # =========================
         imu = Imu()
-        imu.header.stamp = now
+        imu.header.stamp = tstamp
         imu.header.frame_id = self.robot_frame  # base_link
 
         # Orientación (puedes quitarla si quieres que EKF la estime)
@@ -542,6 +572,15 @@ class TartanGroundTFPublisher(Node):
                    return np.load(p) if p.endswith('.npy') else np.loadtxt(p)
            raise FileNotFoundError(f"No se encontró: {npy} ni {txt}")
 
+           
+    def _make_identity_tf(self, stamp, parent: str, child: str) -> TransformStamped:
+        ts = TransformStamped()
+        ts.header.stamp    = stamp
+        ts.header.frame_id = parent
+        ts.child_frame_id  = child
+        ts.transform.rotation.w = 1.0
+        return ts
+
 
     def pose_to_matrix(self,pose:tuple):
         """
@@ -572,40 +611,89 @@ class TartanGroundTFPublisher(Node):
 
         return T
 
+    # def matrix_to_tf(self, matrix, stamp, parent_frame="world", child_frame="base_link"):
+    #     """
+    #     Convierte una matriz homogénea 4x4 en un mensaje TransformStamped.
+
+    #     :param matrix: np.array de 4x4
+    #     :param parent_frame: frame padre
+    #     :param child_frame: frame hijo
+    #     :param node: nodo ROS2 (para timestamp)
+    #     :return: TransformStamped
+    #     """
+
+    #     self.get_logger().info(f'{parent_frame} -> {child_frame}')
+
+    #     if matrix.shape != (4, 4):
+    #         raise ValueError("La matriz debe ser 4x4")
+
+    #     t = TransformStamped()
+
+    #     # Timestamp
+    #     t.header.stamp = stamp
+    #     t.header.frame_id = parent_frame
+    #     t.child_frame_id = child_frame
+
+    #     # Traslación
+    #     t.transform.translation.x = float(matrix[0, 3])
+    #     t.transform.translation.y = float(matrix[1, 3])
+    #     t.transform.translation.z = float(matrix[2, 3])
+
+    #     # Rotación (matriz -> cuaternión)
+    #     rot = matrix[:3, :3]
+    #     qw = math.sqrt(1.0 + rot[0,0] + rot[1,1] + rot[2,2]) / 2.0
+    #     qx = (rot[2,1] - rot[1,2]) / (4.0 * qw)
+    #     qy = (rot[0,2] - rot[2,0]) / (4.0 * qw)
+    #     qz = (rot[1,0] - rot[0,1]) / (4.0 * qw)
+
+    #     t.transform.rotation.x = float(qx)
+    #     t.transform.rotation.y = float(qy)
+    #     t.transform.rotation.z = float(qz)
+    #     t.transform.rotation.w = float(qw)
+
+    #     return t
+
     def matrix_to_tf(self, matrix, stamp, parent_frame="world", child_frame="base_link"):
-        """
-        Convierte una matriz homogénea 4x4 en un mensaje TransformStamped.
-
-        :param matrix: np.array de 4x4
-        :param parent_frame: frame padre
-        :param child_frame: frame hijo
-        :param node: nodo ROS2 (para timestamp)
-        :return: TransformStamped
-        """
-
-        self.get_logger().info(f'{parent_frame} -> {child_frame}')
-
         if matrix.shape != (4, 4):
             raise ValueError("La matriz debe ser 4x4")
 
         t = TransformStamped()
-
-        # Timestamp
-        t.header.stamp = stamp
+        t.header.stamp    = stamp
         t.header.frame_id = parent_frame
-        t.child_frame_id = child_frame
+        t.child_frame_id  = child_frame
 
-        # Traslación
         t.transform.translation.x = float(matrix[0, 3])
         t.transform.translation.y = float(matrix[1, 3])
         t.transform.translation.z = float(matrix[2, 3])
 
-        # Rotación (matriz -> cuaternión)
+        # ✅ Shepperd robusto — elige el componente mayor para dividir
         rot = matrix[:3, :3]
-        qw = math.sqrt(1.0 + rot[0,0] + rot[1,1] + rot[2,2]) / 2.0
-        qx = (rot[2,1] - rot[1,2]) / (4.0 * qw)
-        qy = (rot[0,2] - rot[2,0]) / (4.0 * qw)
-        qz = (rot[1,0] - rot[0,1]) / (4.0 * qw)
+        trace = rot[0,0] + rot[1,1] + rot[2,2]
+
+        if trace > 0:
+            s  = 0.5 / math.sqrt(trace + 1.0)
+            qw = 0.25 / s
+            qx = (rot[2,1] - rot[1,2]) * s
+            qy = (rot[0,2] - rot[2,0]) * s
+            qz = (rot[1,0] - rot[0,1]) * s
+        elif rot[0,0] > rot[1,1] and rot[0,0] > rot[2,2]:
+            s  = 2.0 * math.sqrt(1.0 + rot[0,0] - rot[1,1] - rot[2,2])
+            qw = (rot[2,1] - rot[1,2]) / s
+            qx = 0.25 * s
+            qy = (rot[0,1] + rot[1,0]) / s
+            qz = (rot[0,2] + rot[2,0]) / s
+        elif rot[1,1] > rot[2,2]:
+            s  = 2.0 * math.sqrt(1.0 + rot[1,1] - rot[0,0] - rot[2,2])
+            qw = (rot[0,2] - rot[2,0]) / s
+            qx = (rot[0,1] + rot[1,0]) / s
+            qy = 0.25 * s
+            qz = (rot[1,2] + rot[2,1]) / s
+        else:
+            s  = 2.0 * math.sqrt(1.0 + rot[2,2] - rot[0,0] - rot[1,1])
+            qw = (rot[1,0] - rot[0,1]) / s
+            qx = (rot[0,2] + rot[2,0]) / s
+            qy = (rot[1,2] + rot[2,1]) / s
+            qz = 0.25 * s
 
         t.transform.rotation.x = float(qx)
         t.transform.rotation.y = float(qy)
@@ -720,20 +808,6 @@ class TartanGroundTFPublisher(Node):
 
         self.scan_pub.publish(scan)
 
-    def publish_ned_frame(self):
-        ts = TransformStamped()
-        ts.header.stamp = self._to_ros_time(0.0)
-        ts.header.frame_id = "map"
-        ts.child_frame_id = "ned"
-
-        # -90° Z (NED → ENU)
-        ts.transform.rotation.x = 0.0
-        ts.transform.rotation.y = 0.0
-        ts.transform.rotation.z = 0.7071068
-        ts.transform.rotation.w = 0.7071068
-
-        self.static_tf_broadcaster.sendTransform(ts)    
-
     def _publish_pointcloud(self,idx_cam,time_stamp):
         pcd = o3d.io.read_point_cloud(
         os.path.join(self.lidar_path, self.lidar_files[idx_cam])
@@ -747,11 +821,14 @@ class TartanGroundTFPublisher(Node):
 
         header = Header()
         header.stamp = time_stamp
-        header.frame_id = self.lidar_frame
+        header.frame_id = 'lidar_GT'
 
         # Crear mensaje directamente (sin tocar ejes)
         cloud_msg = pc2.create_cloud_xyz32(header, pts)
 
+        self.pub.publish(cloud_msg)
+
+        header.frame_id = self.lidar_frame
         self.pub.publish(cloud_msg)
 
     def _publish_pointcloud_ENU(self, idx_cam, time_stamp):
@@ -779,10 +856,13 @@ class TartanGroundTFPublisher(Node):
 
         header = Header()
         header.stamp = time_stamp
-        header.frame_id = self.lidar_frame
+        header.frame_id = 'lidar_GT'
 
         cloud_msg = pc2.create_cloud_xyz32(header, self.pts_rot)
 
+        self.pub.publish(cloud_msg)
+
+        header.frame_id = self.lidar_frame
         self.pub.publish(cloud_msg)
 
     def _publish_lidar(self, cam_idx: int, t: float):
@@ -833,7 +913,7 @@ class TartanGroundTFPublisher(Node):
         angle_max_msg = ANGLE_MIN + (num_beams - 1) * ANGLE_INCREMENT
 
         scan = LaserScan()
-        scan.header.stamp    = self._to_ros_time(t)
+        scan.header.stamp    = self.get_clock().now().to_msg()
         scan.header.frame_id = self.lidar_frame
         scan.angle_min       = float(ANGLE_MIN)
         scan.angle_max       = float(angle_max_msg)
@@ -856,8 +936,8 @@ class TartanGroundTFPublisher(Node):
         raw = self.acc[idx]       # [ax, ay, az] NED body CON gravedad
         gyro = self.gyro[idx]      # [wx, wy, wz] NED body
 
-        ax, ay, az = self.ned_to_enu_position(*raw)
-        wx, wy, wz = self.ned_to_enu_position(*gyro)
+        ax, ay, az = ned_to_enu_position(*raw)
+        wx, wy, wz = ned_to_enu_position(*gyro)
 
         imu = Imu()
         imu.header.stamp    = tstamp
@@ -888,7 +968,7 @@ class TartanGroundTFPublisher(Node):
         self.imu_pub.publish(imu)
 
         vb = self.vel_body[idx]   # [vx, vy, vz] NED body
-        vx, vy, vz = self.ned_to_enu_position(*vb)
+        vx, vy, vz = ned_to_enu_position(*vb)
 
         odom = Odometry()
         odom.header.stamp    = tstamp
@@ -932,11 +1012,12 @@ class TartanGroundTFPublisher(Node):
 
         tf_lst = []
 
-        now = self._to_ros_time(self.imu_times[self.current_frame])
+        # now = self._to_ros_time(self.imu_times[self.current_frame])
+        now = self.get_clock().now().to_msg()
 
-        msg_clock = Clock()
-        msg_clock.clock = now
-        self.clock_pub.publish(msg_clock)
+        # msg_clock = Clock()
+        # msg_clock.clock = now
+        # self.clock_pub.publish(msg_clock)
 
         frame = self.current_frame
 
@@ -968,260 +1049,23 @@ class TartanGroundTFPublisher(Node):
             self.get_logger().info(f'OJO AQUI {t}, {dt}')
             return
 
-        # =========================
-        # 1. GYRO → orientación
-        # =========================
-        # gyro_ned = self.gyro[frame]
-        # gyro = self.ned_to_enu_vector(gyro_ned)
-
-        # wx, wy, wz = gyro
-        # norm = np.linalg.norm(gyro)
-
-        # if norm > 1e-8:
-        #     theta = norm * dt
-        #     axis = gyro / norm
-
-        # dq = np.array([
-        #     axis[0]*np.sin(theta/2),
-        #     axis[1]*np.sin(theta/2),
-        #     axis[2]*np.sin(theta/2),
-        #     np.cos(theta/2)
-        # ])
-        # # q = q ⊗ dq
-        # qx, qy, qz, qw = self.orientation_odom_DR
-        # dx, dy, dz, dw = dq
-        # self.orientation_odom_DR= np.array([
-        #     qw*dx + qx*dw + qy*dz - qz*dy,
-        #     qw*dy - qx*dz + qy*dw + qz*dx,
-        #     qw*dz + qx*dy - qy*dx + qz*dw,
-        #     qw*dw - qx*dx - qy*dy - qz*dz
-        # ])
-
-        # # =========================
-        # # 2. VEL BODY → WORLD
-        # # =========================
-        # v_body = self.ned_to_enu_vector(self.vel_body[frame])
-
-        # qx, qy, qz, qw = self.orientation_odom_DR
-
-        # R = np.array([
-        #     [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
-        #     [2*(qx*qy + qz*qw), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)],
-        #     [2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)]
-        # ])
-
-        # v_world = RotZ(R @ v_body)
-
-        # # =========================
-        # # 3. INTEGRAR POSICIÓN
-        # # =========================
-        # self.position_odom_DR += v_world * dt
-
-        # robot_tf = TransformStamped()
-        # robot_tf.header.frame_id = self.world_frame
-        # robot_tf.child_frame_id = self.robot_frame
-        # robot_tf.header.stamp = now
-
-        # robot_tf.transform.translation.x = float(self.position_odom_DR[0])
-        # robot_tf.transform.translation.y = float(self.position_odom_DR[1])
-        # robot_tf.transform.translation.z = float(self.position_odom_DR[2])
-
-        # robot_tf.transform.rotation.x = qx
-        # robot_tf.transform.rotation.y = qy
-        # robot_tf.transform.rotation.z = qz
-        # robot_tf.transform.rotation.w = qw
-
-        # tf_lst.append(robot_tf)
-
-        # odom_msg = Odometry()
-
-        # odom_msg.header.stamp = now
-        # odom_msg.header.frame_id = "odom"   # 🔥 IMPORTANTE
-
-        # # ───────── Child frame ─────────
-        # odom_msg.child_frame_id = self.robot_frame
-
-        # # ───────── Pose ─────────
-        # odom_msg.pose.pose.position.x = float(self.position_odom_DR[0])
-        # odom_msg.pose.pose.position.y = float(self.position_odom_DR[1])
-        # odom_msg.pose.pose.position.z = float(self.position_odom_DR[2])
-
-        # odom_msg.pose.pose.orientation.x = float(qx)
-        # odom_msg.pose.pose.orientation.y = float(qy)
-        # odom_msg.pose.pose.orientation.z = float(qz)
-        # odom_msg.pose.pose.orientation.w = float(qw)
-
-        # # ───────── Velocidad ─────────
-        # odom_msg.twist.twist.linear.x = float(v_world[0])
-        # odom_msg.twist.twist.linear.y = float(v_world[1])
-        # odom_msg.twist.twist.linear.z = float(v_world[2])
-
-        # odom_msg.twist.twist.angular.x = float(wx)
-        # odom_msg.twist.twist.angular.y = float(wy)
-        # odom_msg.twist.twist.angular.z = float(wz)
-
-
-        # twist_msg = TwistWithCovarianceStamped()
-
-        # twist_msg.header.stamp = now
-        # twist_msg.header.frame_id = self.robot_frame
-
-        # twist_msg.twist.twist.linear.x = float(v_body[0])
-        # twist_msg.twist.twist.linear.y = float(v_body[1])
-        # twist_msg.twist.twist.linear.z = float(v_body[2])
-
-        # twist_msg.twist.twist.angular.x = float(wx)
-        # twist_msg.twist.twist.angular.y = float(wy)
-        # twist_msg.twist.twist.angular.z = float(wz)
-
-        # twist_msg.twist.covariance = [
-        #     0.05, 0.0, 0.0, 0.0, 0.0, 0.0,
-        #     0.0, 0.05, 0.0, 0.0, 0.0, 0.0,
-        #     0.0, 0.0, 0.05, 0.0, 0.0, 0.0,
-        #     0.0, 0.0, 0.0, 0.05, 0.0, 0.0,
-        #     0.0, 0.0, 0.0, 0.0, 0.05, 0.0,
-        #     0.0, 0.0, 0.0, 0.0, 0.0, 0.05
-        # ]
-
-        # # =========================
-        # # /odom — ruidoso para EKF
-        # # =========================
-        # odom_msg = Odometry()
-        # odom_msg.header.stamp    = now
-        # odom_msg.header.frame_id = "odom"
-        # odom_msg.child_frame_id  = self.robot_frame
-
-        # # Pose ruidosa (el EKF la ignorará si odom0_config pose=false,
-        # # pero la publicamos para consistencia)
-        # odom_msg.pose.pose.position.x = float(position_noisy[0])
-        # odom_msg.pose.pose.position.y = float(position_noisy[1])
-        # odom_msg.pose.pose.position.z = float(position_noisy[2])
-
-        # qx, qy, qz, qw = self.orientation_odom_DR
-        # odom_msg.pose.pose.orientation.x = float(qx)
-        # odom_msg.pose.pose.orientation.y = float(qy)
-        # odom_msg.pose.pose.orientation.z = float(qz)
-        # odom_msg.pose.pose.orientation.w = float(qw)
-
-        # # Velocidad ruidosa — esto es lo que el EKF realmente consume
-        # odom_msg.twist.twist.linear.x = float(v_world_noisy[0])
-        # odom_msg.twist.twist.linear.y = float(v_world_noisy[1])
-        # odom_msg.twist.twist.linear.z = float(v_world_noisy[2])
-
-        # odom_msg.twist.twist.angular.x = float(gyro_noisy[0])
-        # odom_msg.twist.twist.angular.y = float(gyro_noisy[1])
-        # odom_msg.twist.twist.angular.z = float(gyro_noisy[2])
-
-        # # Covarianza acorde al ruido añadido
-        # vel_var  = self.noise_vel_std  ** 2
-        # gyro_var = self.noise_gyro_std ** 2
-        # pos_var  = self.noise_pos_std  ** 2
-
-        # odom_msg.pose.covariance = [
-        #     pos_var, 0.0,     0.0,     0.0,  0.0,  0.0,
-        #     0.0,     pos_var, 0.0,     0.0,  0.0,  0.0,
-        #     0.0,     0.0,     pos_var, 0.0,  0.0,  0.0,
-        #     0.0,     0.0,     0.0,     0.01, 0.0,  0.0,
-        #     0.0,     0.0,     0.0,     0.0,  0.01, 0.0,
-        #     0.0,     0.0,     0.0,     0.0,  0.0,  0.01
-        # ]
-        # odom_msg.twist.covariance = [
-        #     vel_var,  0.0,      0.0,      0.0,      0.0,      0.0,
-        #     0.0,      vel_var,  0.0,      0.0,      0.0,      0.0,
-        #     0.0,      0.0,      vel_var,  0.0,      0.0,      0.0,
-        #     0.0,      0.0,      0.0,      gyro_var, 0.0,      0.0,
-        #     0.0,      0.0,      0.0,      0.0,      gyro_var, 0.0,
-        #     0.0,      0.0,      0.0,      0.0,      0.0,      gyro_var
-        # ]
-
-        # self.odom_pub.publish(odom_msg)
-
-
-        # ───────── Covarianza (simple pero válida) ─────────
-        # odom_msg.pose.covariance = [
-        #     0.05, 0.0, 0.0, 0.0, 0.0, 0.0,
-        #     0.0, 0.05, 0.0, 0.0, 0.0, 0.0,
-        #     0.0, 0.0, 0.1, 0.0, 0.0, 0.0,
-        #     0.0, 0.0, 0.0, 0.1, 0.0, 0.0,
-        #     0.0, 0.0, 0.0, 0.0, 0.1, 0.0,
-        #     0.0, 0.0, 0.0, 0.0, 0.0, 0.2
-        # ]
-
-        # odom_msg.twist.covariance = [
-        #     0.1, 0.0, 0.0, 0.0, 0.0, 0.0,
-        #     0.0, 0.1, 0.0, 0.0, 0.0, 0.0,
-        #     0.0, 0.0, 0.2, 0.0, 0.0, 0.0,
-        #     0.0, 0.0, 0.0, 0.2, 0.0, 0.0,
-        #     0.0, 0.0, 0.0, 0.0, 0.2, 0.0,
-        #     0.0, 0.0, 0.0, 0.0, 0.0, 0.3
-        # ]
-
-        # # ───────── Publicar ─────────
-        # self.odom_pub.publish(odom_msg)
-
-
-        # ── Cámara: NED → ENU ───────────────────────────────────────────────
-
-        
-
-            # self._pointcloud_to_laserscan()
-
-
         # ── Broadcast TF ────────────────────────────────────────────────────
         self.tf_broadcaster.sendTransform(tf_lst)
+
+        self._publish_odom(now,frame)
 
         # ── Publicar PoseStamped ─────────────────────────────────────────────
         robot_ps  = self._make_pose_stamped(robot_tf_GT)
         
         self.robot_pose_pub.publish(robot_ps)
 
-        self._publish_odom(now,frame)
-
-        # accel_ned = self.acc[frame]
-        # accel_enu = self.ned_to_enu_vector(accel_ned)
-
-        # imu_msg = Imu()
-        # imu_msg.header.stamp    = now
-        # imu_msg.header.frame_id = 'base_link_EKF'   # base_link
-
-        # # IGNORA
-        # qx, qy, qz, qw = self.orientation_odom_DR
-        # imu_msg.orientation.x = float(qx)
-        # imu_msg.orientation.y = float(qy)
-        # imu_msg.orientation.z = float(qz)
-        # imu_msg.orientation.w = float(qw)
-        # imu_msg.orientation_covariance = [-1.0, 0.0, 0.0,
-        #                             0.0, 0.0, 0.0,
-        #                             0.0, 0.0, 0.0]
-
-        # # Velocidad angular (gyro, ya en ENU)
-        # imu_msg.angular_velocity.x = float(gyro[0])   # gyro ya calculado arriba
-        # imu_msg.angular_velocity.y = float(gyro[1])
-        # imu_msg.angular_velocity.z = float(gyro[2])
-        # imu_msg.angular_velocity_covariance = [
-        #     0.005, 0.0,   0.0,
-        #     0.0,   0.005, 0.0,
-        #     0.0,   0.0,   0.005
-        # ]
-
-        # # Aceleración lineal
-        # imu_msg.linear_acceleration.x = float(accel_enu[0])
-        # imu_msg.linear_acceleration.y = float(accel_enu[1])
-        # imu_msg.linear_acceleration.z = float(accel_enu[2])
-        # imu_msg.linear_acceleration_covariance = [
-        #     0.1, 0.0, 0.0,
-        #     0.0, 0.1, 0.0,
-        #     0.0, 0.0, 0.1
-        # ]
-
-        # self.imu_pub.publish(imu_msg)
-
-
         if self.current_frame in self.closest_map:
 
             idx_cam = self.closest_map[frame]
+
+            now = self.get_clock().now().to_msg()
             
-            self._publish_rgb(os.path.join(self.rgb_path,   self.rgb_files[idx_cam]), now)
+            self._publish_rgb(os.path.join(self.rgb_path, self.rgb_files[idx_cam]), now)
             self._publish_pointcloud_ENU(idx_cam,now)
             self._pointcloud_to_laserscan(now)
 
@@ -1235,12 +1079,13 @@ class TartanGroundTFPublisher(Node):
 def main(args=None):
     rclpy.init(args=args)
     try:
+        from rclpy.executors import MultiThreadedExecutor
         node = TartanGroundTFPublisher()
-        rclpy.spin(node)
+        executor = MultiThreadedExecutor(num_threads=4)
+        executor.add_node(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
-    except SystemExit as e:
-        rclpy.logging.get_logger('tartanground_tf_publisher').fatal(str(e))
     finally:
         rclpy.shutdown()
 
