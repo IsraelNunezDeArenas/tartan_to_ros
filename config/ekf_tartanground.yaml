@@ -1,167 +1,33 @@
-# =============================================================================
-# ekf_tartanground.yaml — Configuración robot_localization EKF
-# =============================================================================
-#
-# Fusión de sensores:
-#   odom0  = /odom          → twist (vx, vy, wz) en base_link
-#   imu0   = /imu/data      → angular_velocity (wz) en base_link
-#
-# El EKF integra las velocidades para estimar:
-#   x, y, yaw en frame odom
-# y publica TF odom → base_link.
-#
-# AMCL usa ese TF + /scan para publicar TF map → odom.
-#
-# Estado del filtro (15 dimensiones):
-#   [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-#
-# Con two_d_mode=true, z, roll, pitch quedan fijados a 0.
-# =============================================================================
-
+# ekf.yaml
 ekf_filter_node:
   ros__parameters:
-
-    # ── Temporización ─────────────────────────────────────────────────────────
-    # Frecuencia del filtro: debe ser >= frecuencia más alta de los sensores.
-    # IMU de TartanGround a ~100 Hz → EKF a 100 Hz.
-    frequency: 100.0
-
-    # Tiempo máximo sin datos antes de que el sensor se considere inactivo.
-    sensor_timeout: 0.5
-
-    # ── Modo 2D ───────────────────────────────────────────────────────────────
-    # true → z, roll, pitch fijados a 0 (robot en suelo plano).
+    frequency: 30.0
     two_d_mode: true
-
-    # ── Frames ────────────────────────────────────────────────────────────────
-    map_frame:       map
-    odom_frame:      odom
+    world_frame: map
+    odom_frame:  odom
     base_link_frame: base_link
-    world_frame:     odom      # EKF estima pose en odom frame (no map)
-
-    # ── TF ────────────────────────────────────────────────────────────────────
-    # true → el EKF publica TF odom→base_link (reemplaza al nodo dataset)
-    publish_tf: true
-
-    # Tolerancia de timestamp para asociar mensajes (segundos).
-    # 0.1 s tolera el desfase entre IMU (100 Hz) y cámara (10 Hz).
+    reset_on_time_jump: true
     transform_timeout: 0.1
 
-    # ── Fuente 0: odometría (/odom) ──────────────────────────────────────────
-    # El nodo de dataset publica sólo twist con covarianza de pose muy alta.
-    # Configuramos el EKF para usar SÓLO el twist.
-    #
-    # Máscara booleana (15 elementos):
-    #   [x,  y,  z,  roll, pitch, yaw,
-    #    vx, vy, vz, vroll,vpitch,vyaw,
-    #    ax, ay, az]
+    # ── odom0: velocidades de vel_body ────────────────────────
     odom0: /odom
-    odom0_config: [
-  false, false, false,   # x y z
-  false, false, false,   # roll pitch yaw
-  true,  true,  false,   # vx vy
-  false, false, true,    # vroll vpitch vyaw (angular.z)
-  false, false, false
-]
+    odom0_config:
+      # Usamos SOLO twist (velocidades), NO pose absoluta
+      #  x      y      z    roll  pitch   yaw
+      - [false, false, false, false, false, false,
+      #  vx     vy     vz   vroll vpitch  vyaw
+         true,  true,  false, false, false, true,
+      #  ax     ay     az
+         false, false, false]
+    odom0_differential: false  # ya tenemos velocidad directa, no diferencial
 
-    odom0_queue_size: 20
-    odom0_nodelay: true
-
-    # false → EKF usa los valores absolutos de twist (no diferencias).
-    odom0_differential: false
-
-    # false → twist en frame odom (ya está en base_link gracias a child_frame_id)
-    odom0_relative: false
-
-    # Pose rejection: rechaza outliers > N sigma. 0 = desactivado.
-    # Para odometría con cov muy alta en pose, no hace falta.
-    odom0_pose_rejection_threshold: 0.0
-    odom0_twist_rejection_threshold: 3.0
-
-    # ── Fuente 1: IMU (/imu/data) ────────────────────────────────────────────
-    # Usamos sólo la velocidad angular (wz) del giroscopio.
-    # La aceleración lineal tiene covarianza alta (derivada numérica) → ignorar.
-    # La orientación no está disponible → ignorar (orientation_covariance[0]=-1).
-    imu0: /imu/data
-    imu0_config: [false, false, false,   # x, y, z         → ignorar
-                  false, false, false,   # roll, pitch, yaw → ignorar
-                  false, false, false,   # vx, vy, vz       → ignorar
-                  false, false, true,    # vyaw              → USAR (wz del IMU)
-                  false, false, false]   # ax, ay, az        → ignorar
-
-    imu0_queue_size: 20
-    imu0_nodelay: true
+    # ── imu0: acc (con gravedad) + gyro ───────────────────────
+    imu0: /imu/data_raw
+    imu0_config:
+      - [false, false, false,
+         false, false, false,
+         false, false, false,
+         true,  true,  true,   # gyro → velocidades angulares
+         true,  true,  false]  # acc  → aceleraciones lineales (sin Z en 2D)
+    imu0_remove_gravitational_acceleration: true  # ← CRÍTICO: usamos 'acc' crudo
     imu0_differential: false
-    imu0_relative: false
-
-    # true → elimina g del eje z (0 m/s²) — sin efecto porque ax/ay/az desactivados
-    imu0_remove_gravitational_acceleration: true
-
-    # Rechazo de outliers del IMU (wz)
-    imu0_angular_velocity_rejection_threshold: 3.0
-
-    # ── Covarianza de proceso (ruido del modelo de movimiento) ───────────────
-    # Matriz 15×15 aplanada por filas (fila = estado[i], columna = estado[j]).
-    # Con two_d_mode=true sólo importan: x(0), y(1), yaw(5), vx(6), vy(7), wyaw(11)
-    #
-    # Diagonal principal (sólo términos relevantes en 2D):
-    #   [0]  x    : 0.05  m²/s
-    #   [1]  y    : 0.05
-    #   [2]  z    : 0.06  (fijado a 0, valor alto no importa)
-    #   [3]  roll : 0.03  (fijado a 0)
-    #   [4]  pitch: 0.03  (fijado a 0)
-    #   [5]  yaw  : 0.06  rad²/s
-    #   [6]  vx   : 0.025 m²/s²
-    #   [7]  vy   : 0.025
-    #   [8]  vz   : 0.04  (no usado)
-    #   [9]  vroll: 0.01
-    #   [10] vpitch:0.01
-    #   [11] vyaw : 0.02  rad²/s²
-    #   [12] ax   : 0.01
-    #   [13] ay   : 0.01
-    #   [14] az   : 0.015
-    process_noise_covariance: [
-      0.05,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.05,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.025, 0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.025, 0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.04,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,   0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,   0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.02,  0.0,   0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,   0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,
-      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.015
-    ]
-
-    # ── Covarianza inicial del estado ─────────────────────────────────────────
-    # El EKF arranca con x=y=yaw=0 (posición relativa al inicio de la trayectoria)
-    # Incertidumbre inicial pequeña porque arrancamos en un punto conocido.
-    initial_estimate_covariance: [
-      1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9
-    ]
-
-    # ── Publicar aceleración ──────────────────────────────────────────────────
-    publish_acceleration: false
-
-    # ── Suavizado retroactivo (RTS smoother) ─────────────────────────────────
-    # Solo disponible con el nodo ukf_filter_node. Con EKF dejar en false.
-    smooth_lagged_data: false

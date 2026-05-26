@@ -45,7 +45,8 @@
   <node pkg="tartan_to_ros"
         exec="map_tartanground.py"
         name="pcd_map_publisher"
-        output="screen">
+        output="screen"
+        launch-prefix="bash -c 'sleep 8; $0 $@'">
 
     <param name="pcd_path"
            value="/home/israel/tartanairpy/Office/Office_rgb.pcd"/>
@@ -82,10 +83,10 @@
 
 
 
-<node pkg="tf2_ros"
+<!-- <node pkg="tf2_ros"
       exec="static_transform_publisher"
       name="map_to_odom_tf"
-      args="0 0 0 0 0 0 map odom" />
+      args="0 0 0 0 0 0 map odom" /> -->
 
   <!-- ================================================================ -->
   <!--  NODO 6 — RViz2                                                  -->

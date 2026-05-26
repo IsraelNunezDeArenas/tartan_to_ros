@@ -205,13 +205,6 @@ class TartanGroundTFPublisher(Node):
             f'Frecuencia: {10*self.rate_hz} Hz  |  Loop: {self.loop}')
 
         # ── Odometría - Dead Reckoning ─────────────────────────────────────────────────
-        self.position_odom_DR = None
-        self.velocity = np.zeros(3)
-        self.orientation_odom_DR= None
-        
-        self.position_odom_DR_body = None
-        self.velocity_body = np.zeros(3)
-        self.orientation_odom_DR_body= None
 
         self.last_time = None
 
@@ -224,7 +217,6 @@ class TartanGroundTFPublisher(Node):
         self.camera_pose_pub = self.create_publisher(PoseStamped, 'camera_pose', 10)
 
         self.robot_pose_pub_GT  = self.create_publisher(PoseStamped, 'robot_pose_GT', 10)
-
 
         self.pub              = self.create_publisher(PointCloud2, '/pointcloud', 10)
         self.rgb_pub          = self.create_publisher(Image, '/camera/rgb', 10)
@@ -241,20 +233,22 @@ class TartanGroundTFPublisher(Node):
             history=HistoryPolicy.KEEP_LAST, 
             depth=1)
 
-        self.initialpose_pub        = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', qos_latched)
-
         self.odom_pub        = self.create_publisher(Odometry, '/odom', 10)
 
         self.twist_pub  = self.create_publisher(TwistWithCovarianceStamped,'/twist',10)
 
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
 
+        # En __init__, añadir el publicador:
+        self.set_pose_pub = self.create_publisher(PoseWithCovarianceStamped, '/set_pose', 10)
+
         # ── TF estático: map → odom (identidad) ─────────────────────────────
+
+        self._publish_initial_pose()        # Debug
  
         self.closest_times()
         self.closest_map = {imu: cam for imu, cam in self.closest_pairs}
 
-        # self._publish_static_identity('odom', self.world_frame) # World -> Odom
         self._publish_initial_state()   # Base_Link -> Camera
 
 
@@ -286,6 +280,8 @@ class TartanGroundTFPublisher(Node):
             [tf_base_cam_GT, tf_base_cam, tf_lidar_gt, tf_lidar]
         )
 
+        self._publish_map_to_odom_at_p0()
+
         self.get_logger().info('✓ Nodo TartanGround TF Publisher iniciado.')
         self.get_logger().info(f'  Marcos TF: NED → {self.robot_frame} → {self.camera_frame}')
         self.get_logger().info('Esperando mapa')
@@ -293,7 +289,39 @@ class TartanGroundTFPublisher(Node):
         
     # -----------------------------------------------------------------------
 
+    def _publish_map_to_odom_at_p0(self):
+        p0 = self._pose_ned_to_pose_enu(self.robot_poses_ned[0])
+
+        # map → odom en p0
+        ts_map_odom = TransformStamped()
+        ts_map_odom.header.stamp    = self.get_clock().now().to_msg()
+        ts_map_odom.header.frame_id = 'map'
+        ts_map_odom.child_frame_id  = 'odom'
+        ts_map_odom.transform.translation.x = p0[0]
+        ts_map_odom.transform.translation.y = p0[1]
+        ts_map_odom.transform.translation.z = 0.0
+        ts_map_odom.transform.rotation.x = p0[3]
+        ts_map_odom.transform.rotation.y = p0[4]
+        ts_map_odom.transform.rotation.z = p0[5]
+        ts_map_odom.transform.rotation.w = p0[6]
+
+        # odom → base_link identidad (placeholder hasta que el EKF arranque)
+        ts_odom_bl = TransformStamped()
+        ts_odom_bl.header.stamp    = self.get_clock().now().to_msg()
+        ts_odom_bl.header.frame_id = 'odom'
+        ts_odom_bl.child_frame_id  = 'base_link'
+        ts_odom_bl.transform.rotation.w = 1.0
+
+        # Una sola llamada para ambos
+        self.static_tf_broadcaster.sendTransform([ts_map_odom, ts_odom_bl])
+        self.get_logger().info(
+            f'✓ map→odom en p0: x={p0[0]:.3f}  y={p0[1]:.3f}  '
+            f'| odom→base_link identidad (placeholder EKF)')
+
+
     def map_received_cb(self,msg):
+
+        self._publish_initial_pose()    
 
         self.get_logger().info('Mapa recibido: Inciando repoducción')
 
@@ -332,7 +360,8 @@ class TartanGroundTFPublisher(Node):
            0.0, 0.0, 0.0, 0.0, 0.0, 0.068
         ]       
 
-        self.initialpose_pub.publish(msg)
+         # Al EKF (resetea estado interno)
+        self.set_pose_pub.publish(msg)
 
     def _publish_initial_state(self):
 
@@ -371,20 +400,9 @@ class TartanGroundTFPublisher(Node):
         self.tf_broadcaster.sendTransform([tf_init_GT])
 
         #PUBLICAR TF REAL
-
-       # ✅ Dinámica: va a /tf, AMCL la sobreescribe limpiamente
-        # ts = TransformStamped()
-        # ts.header.stamp    = self.get_clock().now().to_msg()
-        # ts.header.frame_id = self.world_frame   # map
-        # ts.child_frame_id  = 'odom'
-        # ts.transform.rotation.w = 1.0
-        # self.tf_broadcaster.sendTransform(ts)
         
-        self._publish_initial_pose()        # Debug
+
         # ----------------------------------------------
-
-
-        # Odometría - Dead Reckoning
 
         self.last_time = self.imu_times[0]
 
@@ -450,16 +468,6 @@ class TartanGroundTFPublisher(Node):
         imu.linear_acceleration.z = float(accel_enu[2])
 
         self.imu_pub.publish(imu)
-
-    
-    def _publish_static_identity(self, child: str, parent: str):
-        """Publica una transformación estática identidad."""
-        ts = TransformStamped()
-        ts.header.stamp    = self._to_ros_time(0.0)
-        ts.header.frame_id = parent
-        ts.child_frame_id  = child
-        ts.transform.rotation.w = 1.0   # cuaternión identidad
-        self.static_tf_broadcaster.sendTransform(ts)
 
     # -----------------------------------------------------------------------
 
@@ -930,15 +938,27 @@ class TartanGroundTFPublisher(Node):
         vx, vy, vz = v
         return np.array([vy, vx, -vz])
 
-    def _publish_odom(self,tstamp,idx):
+    def _publish_odom(self, tstamp, idx):
 
-        # ── IMU ───────────────────────────────────────────────────
-        raw = self.acc[idx]       # [ax, ay, az] NED body CON gravedad
-        gyro = self.gyro[idx]      # [wx, wy, wz] NED body
+        # ── Rotación al frame base_link (Rz -90° sobre ENU) ──────────────
+        #   base_link X (rojo) = Norte = ENU Y  →  vx_bl =  vy_enu
+        #   base_link Y (verde) = Oeste = -ENU X →  vy_bl = -vx_enu
+        def enu_to_baselink(ex, ey, ez):
+            return ey, -ex, ez
 
-        ax, ay, az = ned_to_enu_position(*raw)
-        wx, wy, wz = ned_to_enu_position(*gyro)
+        # ── Aceleración ───────────────────────────────────────────────────
+        ax_enu, ay_enu, az_enu = ned_to_enu_position(*self.acc[idx])
+        ax, ay, az = enu_to_baselink(ax_enu, ay_enu, az_enu)
 
+        # ── Giroscopio ────────────────────────────────────────────────────
+        wx_enu, wy_enu, wz_enu = ned_to_enu_position(*self.gyro[idx])
+        wx, wy, wz = enu_to_baselink(wx_enu, wy_enu, wz_enu)
+
+        # ── Velocidad lineal ──────────────────────────────────────────────
+        vx_enu, vy_enu, vz_enu = ned_to_enu_position(*self.vel_body[idx])
+        vx, vy, vz = enu_to_baselink(vx_enu, vy_enu, vz_enu)
+
+        # ── IMU ───────────────────────────────────────────────────────────
         imu = Imu()
         imu.header.stamp    = tstamp
         imu.header.frame_id = self.robot_frame
@@ -946,7 +966,6 @@ class TartanGroundTFPublisher(Node):
         imu.linear_acceleration.x = ax
         imu.linear_acceleration.y = ay
         imu.linear_acceleration.z = az
-        # Covarianza diagonal (ajusta con varianza real del dataset)
         imu.linear_acceleration_covariance = [
             0.01, 0.0,  0.0,
             0.0,  0.01, 0.0,
@@ -962,20 +981,16 @@ class TartanGroundTFPublisher(Node):
             0.0,   0.0,   0.005
         ]
 
-        # -1 en [0] indica que NO publicamos orientación desde IMU
-        imu.orientation_covariance[0] = -1.0
+        imu.orientation_covariance[0] = -1.0  # sin orientación desde IMU
 
         self.imu_pub.publish(imu)
 
-        vb = self.vel_body[idx]   # [vx, vy, vz] NED body
-        vx, vy, vz = ned_to_enu_position(*vb)
-
+        # ── Odometría (solo twist) ────────────────────────────────────────
         odom = Odometry()
         odom.header.stamp    = tstamp
         odom.header.frame_id = 'odom'
         odom.child_frame_id  = self.robot_frame
 
-        # Solo twist (velocidad); la pose la estima el EKF
         odom.twist.twist.linear.x  = vx
         odom.twist.twist.linear.y  = vy
         odom.twist.twist.linear.z  = vz
@@ -993,7 +1008,6 @@ class TartanGroundTFPublisher(Node):
         ]
 
         self.odom_pub.publish(odom)
-
 
 
     def _timer_callback(self):
