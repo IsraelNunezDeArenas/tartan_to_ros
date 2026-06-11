@@ -328,6 +328,14 @@ class TartanGroundTFPublisher(Node):
         self.timer = self.create_timer(1.0 / (10*self.rate_hz), self._timer_callback)
         return
 
+    def _publish_static_identity(self, child: str, parent: str):
+        """Publica una transformación estática identidad."""
+        ts = TransformStamped()
+        ts.header.stamp    = self._to_ros_time(0.0)
+        ts.header.frame_id = parent
+        ts.child_frame_id  = child
+        ts.transform.rotation.w = 1.0   # cuaternión identidad
+        return ts
 
     def _publish_initial_pose(self):
 
