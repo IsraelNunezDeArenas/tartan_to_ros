@@ -235,6 +235,8 @@ class TartanGroundTFPublisher(Node):
 
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
 
+        self.localizer_pub = self.create_publisher(PoseWithCovarianceStamped, '/localizer/pose', 10)
+
         # En __init__, añadir el publicador:
         self.set_pose_pub = self.create_publisher(PoseWithCovarianceStamped, '/set_pose', 10)
 
@@ -290,7 +292,7 @@ class TartanGroundTFPublisher(Node):
 
         self.get_logger().info('Mapa recibido: Inciando repoducción')
 
-        self.timer = self.create_timer(1.0 / (10*self.rate_hz), self._timer_callback)
+        self.timer = self.create_timer(1.0 / (self.rate_hz), self._timer_callback)
         return
 
     def _publish_static_identity(self, child: str, parent: str):
@@ -322,6 +324,7 @@ class TartanGroundTFPublisher(Node):
         tf_base_cam = self.matrix_to_tf(T_base_cam, tstamp, self.robot_frame, self.camera_frame)    
         tf_lidar_camera_GT = self._publish_static_identity(self.lidar_frame_GT, self.camera_frame_GT)
         tf_lidar_camera = self._publish_static_identity(self.lidar_frame, self.camera_frame)    
+    
         self.static_tf_broadcaster.sendTransform([tf_base_cam_GT,tf_base_cam,tf_lidar_camera_GT,tf_lidar_camera,tf_map_odom])
 
 
@@ -470,16 +473,6 @@ class TartanGroundTFPublisher(Node):
                    return np.load(p) if p.endswith('.npy') else np.loadtxt(p)
            raise FileNotFoundError(f"No se encontró: {npy} ni {txt}")
 
-           
-    def _make_identity_tf(self, stamp, parent: str, child: str) -> TransformStamped:
-        ts = TransformStamped()
-        ts.header.stamp    = stamp
-        ts.header.frame_id = parent
-        ts.child_frame_id  = child
-        ts.transform.rotation.w = 1.0
-        return ts
-
-
     def pose_to_matrix(self,pose:tuple):
         """
         Convierte una pose (x, y, z, qx, qy, qz, qw) en una matriz 4x4.
@@ -508,48 +501,6 @@ class TartanGroundTFPublisher(Node):
         T[2, 3] = z
 
         return T
-
-    # def matrix_to_tf(self, matrix, stamp, parent_frame="world", child_frame="base_link"):
-    #     """
-    #     Convierte una matriz homogénea 4x4 en un mensaje TransformStamped.
-
-    #     :param matrix: np.array de 4x4
-    #     :param parent_frame: frame padre
-    #     :param child_frame: frame hijo
-    #     :param node: nodo ROS2 (para timestamp)
-    #     :return: TransformStamped
-    #     """
-
-    #     self.get_logger().info(f'{parent_frame} -> {child_frame}')
-
-    #     if matrix.shape != (4, 4):
-    #         raise ValueError("La matriz debe ser 4x4")
-
-    #     t = TransformStamped()
-
-    #     # Timestamp
-    #     t.header.stamp = stamp
-    #     t.header.frame_id = parent_frame
-    #     t.child_frame_id = child_frame
-
-    #     # Traslación
-    #     t.transform.translation.x = float(matrix[0, 3])
-    #     t.transform.translation.y = float(matrix[1, 3])
-    #     t.transform.translation.z = float(matrix[2, 3])
-
-    #     # Rotación (matriz -> cuaternión)
-    #     rot = matrix[:3, :3]
-    #     qw = math.sqrt(1.0 + rot[0,0] + rot[1,1] + rot[2,2]) / 2.0
-    #     qx = (rot[2,1] - rot[1,2]) / (4.0 * qw)
-    #     qy = (rot[0,2] - rot[2,0]) / (4.0 * qw)
-    #     qz = (rot[1,0] - rot[0,1]) / (4.0 * qw)
-
-    #     t.transform.rotation.x = float(qx)
-    #     t.transform.rotation.y = float(qy)
-    #     t.transform.rotation.z = float(qz)
-    #     t.transform.rotation.w = float(qw)
-
-    #     return t
 
     def matrix_to_tf(self, matrix, stamp, parent_frame="world", child_frame="base_link"):
         if matrix.shape != (4, 4):
@@ -636,6 +587,56 @@ class TartanGroundTFPublisher(Node):
 
         self.robot_poses_ned = np.hstack((pos, np.stack((qx, qy, qz, qw), axis=1)))
 
+    def add_white_noise(self, data, std, seed=42):
+        """
+        Añade ruido blanco gaussiano reproducible a un vector.
+
+        Args:
+            data (list or np.ndarray): señal original
+            std (float or list): desviación estándar del ruido
+            seed (int): semilla para reproducibilidad
+
+        Returns:
+            np.ndarray: señal con ruido
+        """
+        rng = np.random.default_rng(seed)
+
+        data = np.array(data)
+
+        noise = rng.normal(loc=0.0, scale=std, size=data.shape)
+
+        return data + noise
+
+    def _publish_localization_pose(self,idx,tstamp):
+
+
+        pose_loc = self._pose_ned_to_pose_enu(self.robot_poses_ned[idx])
+
+        out = PoseWithCovarianceStamped()
+        out.header.stamp    = tstamp
+        out.header.frame_id = 'map'
+        
+        
+        out.pose.pose.position.x = pose_loc[0]
+        out.pose.pose.position.y = pose_loc[1]
+        out.pose.pose.position.z = pose_loc[2]
+
+        out.pose.pose.orientation.x = pose_loc[3]
+        out.pose.pose.orientation.y = pose_loc[4]
+        out.pose.pose.orientation.z = pose_loc[5]
+        out.pose.pose.orientation.w = pose_loc[6]
+
+        # Covarianza diagonal 6x6 - Aproximación 2D
+        cov = np.zeros(36)
+        cov[0]  = 2.5e-3
+        cov[7]  = 2.5e-3
+        cov[14] = 1e-7   
+        cov[21] = 1e-7 
+        cov[28] = 1e-7 
+        cov[35] = 2.5e-3  # var yaw
+        out.pose.covariance = cov.tolist()
+
+        self.localizer_pub.publish(out)
 
     def _publish_pointcloud_ENU(self, idx_cam, time_stamp):
 
@@ -671,67 +672,6 @@ class TartanGroundTFPublisher(Node):
         header.frame_id = self.lidar_frame
         self.pointcloud_pub.publish(cloud_msg)
 
-    def _publish_lidar(self, cam_idx: int, t: float):
-    
-        pcd = o3d.io.read_point_cloud(
-            os.path.join(self.lidar_path, self.lidar_files[cam_idx]))
-        pts = np.asarray(pcd.points)
-
-        if pts.shape[0] == 0:
-            self.get_logger().warn(f"PLY vacío en índice {cam_idx}")
-            return
-
-        # Frame óptico: x=right, y=down, z=fwd
-        xs, ys, zs = pts[:, 1], pts[:, 0], -pts[:, 2]
-
-        # Filtro de altura en frame óptico (y = abajo)
-
-        x_ros = zs
-        y_ros = -xs
-        z_ros = -ys 
-
-        mask = (ys > -0.3) & (ys < 0.3)
-        xs, zs = xs[mask], zs[mask]
-
-        if xs.size == 0:
-            self.get_logger().warn(f"Slice vacío en índice {cam_idx}")
-            return
-
-        # [F4] Vectorizado
-        num_beams = int(round((ANGLE_MAX - ANGLE_MIN) / ANGLE_INCREMENT))
-        angles    = np.arctan2(y_ros, x_ros)
-        distances = np.hypot(x_ros, y_ros)
-        beam_idx  = ((angles - ANGLE_MIN) / ANGLE_INCREMENT).astype(np.int32)
-
-        valid = (
-            (beam_idx >= 0) & (beam_idx < num_beams) &
-            (distances >= RANGE_MIN) & (distances <= RANGE_MAX)
-        )
-        beam_idx  = beam_idx[valid]
-        distances = distances[valid]
-
-        ranges = np.full(num_beams, np.inf, dtype=np.float32)
-        np.minimum.at(ranges, beam_idx, distances)
-        ranges[np.isinf(ranges)] = RANGE_MAX
-
-        # [F3] Timestamp sincronizado con el último TF odom→base_link
-        # angle_max ajustado a REP-117
-        angle_max_msg = ANGLE_MIN + (num_beams - 1) * ANGLE_INCREMENT
-
-        scan = LaserScan()
-        scan.header.stamp    = self.get_clock().now().to_msg()
-        scan.header.frame_id = self.lidar_frame
-        scan.angle_min       = float(ANGLE_MIN)
-        scan.angle_max       = float(angle_max_msg)
-        scan.angle_increment = float(ANGLE_INCREMENT)
-        scan.time_increment  = 0.0
-        scan.scan_time       = 1.0 / self.rate_hz
-        scan.range_min       = RANGE_MIN
-        scan.range_max       = RANGE_MAX
-        scan.ranges          = ranges.tolist()
-        scan.intensities     = []
-        self.scan_pub.publish(scan)
-
     def ned_to_enu_vector(self, v):
         vx, vy, vz = v
         return np.array([vy, vx, -vz])
@@ -755,6 +695,8 @@ class TartanGroundTFPublisher(Node):
         # ── Velocidad lineal ──────────────────────────────────────────────
         vx_enu, vy_enu, vz_enu = ned_to_enu_position(*self.vel_body[idx])
         vx, vy, vz = enu_to_baselink(vx_enu, vy_enu, vz_enu)
+
+        # ── Ruido ──────────────────────────────────────────────
 
         # ── IMU ───────────────────────────────────────────────────────────
         imu = Imu()
@@ -806,7 +748,6 @@ class TartanGroundTFPublisher(Node):
         ]
 
         self.odom_pub.publish(odom)
-
 
     def _timer_callback(self):
 
@@ -861,7 +802,7 @@ class TartanGroundTFPublisher(Node):
 
             idx_cam = self.closest_map[frame]
 
-            # now = self.get_clock().now().to_msg()
+            self._publish_localization_pose(frame,now)
             
             self._publish_rgb(os.path.join(self.rgb_path, self.rgb_files[idx_cam]), now)
             self._publish_pointcloud_ENU(idx_cam,now)
