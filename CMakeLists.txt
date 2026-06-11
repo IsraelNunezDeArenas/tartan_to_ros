@@ -19,17 +19,8 @@ find_package(cv_bridge REQUIRED)
 # ── Scripts ejecutables ───────────────────────────────────────────────────────
 install(
   PROGRAMS
-    src/topic_gen2.py
     src/map_tartanground.py
-    src/amcl_logger.py
-    src/tartanground_node_fixed.py
-    src/tartanground_node_fixed2.py
-    src/tartanground_node_fixed3.py
-    src/TF_Listener.py
-    src/tartanground_node_ekf.py
-    src/tartanground_node_ekf2.py
     src/tartanground_debug.py
-    src/map_tartanground_CC.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

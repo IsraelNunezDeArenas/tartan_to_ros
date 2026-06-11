@@ -280,7 +280,7 @@ class TartanGroundTFPublisher(Node):
             [tf_base_cam_GT, tf_base_cam, tf_lidar_gt, tf_lidar]
         )
 
-        self._publish_map_to_odom_at_p0()
+        # self._publish_map_to_odom_at_p0()
 
         self.get_logger().info('✓ Nodo TartanGround TF Publisher iniciado.')
         self.get_logger().info(f'  Marcos TF: NED → {self.robot_frame} → {self.camera_frame}')
