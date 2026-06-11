@@ -21,6 +21,7 @@ install(
   PROGRAMS
     src/map_tartanground.py
     src/tartanground_debug.py
+    src/odom_to_pose.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

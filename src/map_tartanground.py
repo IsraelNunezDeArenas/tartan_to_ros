@@ -21,7 +21,6 @@ from std_msgs.msg import Empty
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
 
-
 class PcdMapPublisher(Node):
 
     def __init__(self):
@@ -92,6 +91,11 @@ class PcdMapPublisher(Node):
         self.meta_pub.publish(meta_msg)
 
         self.map_published.publish(Empty())
+
+    
+    
+    def _to_ros_time(self, t: float) -> Time:
+        return Time(sec=int(t), nanosec=int((t % 1) * 1e9))
 
     # =========================================================================
     # Conversión PCD → OccupancyGrid
@@ -167,7 +171,7 @@ class PcdMapPublisher(Node):
             self.get_logger().warn("cv2 no disponible; sin dilatación.")
 
         # ── 7. Mensaje ────────────────────────────────────────────────────────
-        now = self.get_clock().now().to_msg()   # ✅ timestamp real
+        now = self._to_ros_time(0.0)   # ✅ timestamp real
 
         info                       = MapMetaData()
         info.map_load_time         = now

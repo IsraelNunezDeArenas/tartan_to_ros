@@ -35,8 +35,7 @@
     <param name="fy" value="320.0"/>
     <param name="cx" value="320.0"/>
     <param name="cy" value="320.0"/>
-
-    <!-- [L1] Tiempo simulado -->
+    
   </node>
 
   <!-- ================================================================ -->
@@ -78,7 +77,6 @@
       output="screen"
       respawn="true">
   <param from="$(find-pkg-share tartan_to_ros)/config/ekf_tartanground.yaml"/>
-  <param name="use_sim_time" value="false"/>
 </node>
 
 
@@ -96,7 +94,7 @@
         name="rviz2"
         args="-d src/tartan_to_ros/rviz/TartanGroundRVIZ.rviz"
         output="screen">
-    <param name="use_sim_time" value="false"/>
+    <param name="use_sim_time" value="true"/>
   </node>
 
 </launch>

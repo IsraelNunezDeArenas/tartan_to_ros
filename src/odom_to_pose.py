@@ -1,4 +1,5 @@
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PoseWithCovarianceStamped
 
 class PoseReader(Node):
     def __init__(self):
@@ -9,22 +10,23 @@ class PoseReader(Node):
             self.cb,
             10
         )
+        self.pub = self.create_publisher(
+            PoseWithCovarianceStamped,
+            '/pose/filtered',
+            10
+        )
 
     def cb(self, msg: Odometry):
-        # Posición
-        x = msg.pose.pose.position.x
-        y = msg.pose.pose.position.y
-        z = msg.pose.pose.position.z
+        out = PoseWithCovarianceStamped()
 
-        # Orientación (quaternion)
-        qx = msg.pose.pose.orientation.x
-        qy = msg.pose.pose.orientation.y
-        qz = msg.pose.pose.orientation.z
-        qw = msg.pose.pose.orientation.w
+        # Mismo timestamp y frame que el EKF
+        out.header.stamp    = msg.header.stamp
+        out.header.frame_id = msg.header.frame_id
 
-        # Covarianza de pose (matriz 6x6 aplanada, orden x,y,z,roll,pitch,yaw)
-        cov = msg.pose.covariance   # lista de 36 elementos
-        var_x   = cov[0]
-        var_y   = cov[7]
-        var_z   = cov[14]
-        var_yaw = cov[35]
+        # Pose
+        out.pose.pose = msg.pose.pose
+
+        # Covarianza completa (6x6 → 36 elementos)
+        out.pose.covariance = msg.pose.covariance
+
+        self.pub.publish(out)

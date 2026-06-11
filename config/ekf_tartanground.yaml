@@ -3,12 +3,15 @@ ekf_filter_node:
   ros__parameters:
     frequency: 30.0
     two_d_mode: false
-    world_frame: map
-    odom_frame:  odom
+    map_frame:       map
+    odom_frame:      odom        # debe existir aunque no lo uses activamente
     base_link_frame: base_link
+    world_frame:     odom         # publica map → base_link
+
     reset_on_time_jump: true
     transform_timeout: 0.1
     publish_tf: true
+    use_sim_time: true
 
     # ── odom0: velocidades de vel_body ────────────────────────
     odom0: /odom
