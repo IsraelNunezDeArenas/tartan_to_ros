@@ -1,5 +1,8 @@
+#!/usr/bin/env python3
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from rclpy.node import Node
+import rclpy
 
 class PoseReader(Node):
     def __init__(self):
@@ -30,3 +33,17 @@ class PoseReader(Node):
         out.pose.covariance = msg.pose.covariance
 
         self.pub.publish(out)
+
+
+def main():
+    rclpy.init()
+    node = PoseReader()
+    # El mapa ya está publicado (latched); solo necesitamos mantener el nodo vivo
+    # para que los suscriptores tardíos (AMCL, rviz) reciban el QoS transient local.
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

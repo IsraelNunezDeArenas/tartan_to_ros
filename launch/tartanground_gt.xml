@@ -38,6 +38,15 @@
     
   </node>
 
+  <node pkg="tartan_to_ros"
+        exec="odom_to_pose.py"
+        name="odom_to_pose"
+        output="screen">
+
+        <param name="use_sim_tiem" value="true"/>
+
+        </node>
+
   <!-- ================================================================ -->
   <!--  NODO 2 — PcdMapPublisher                                        -->
   <!-- ================================================================ -->

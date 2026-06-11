@@ -32,7 +32,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: PointCloud2
 Visualization Manager:
   Class: ""
   Displays:
@@ -241,7 +241,10 @@ Visualization Manager:
               lidar_GT:
                 {}
           odom:
-            {}
+            base_link:
+              camera:
+                lidar:
+                  {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -320,6 +323,41 @@ Visualization Manager:
       Radius: 0.30000001192092896
       Reference Frame: base_link
       Value: true
+    - Alpha: 1
+      Axes Length: 1
+      Axes Radius: 0.10000000149011612
+      Class: rviz_default_plugins/PoseWithCovariance
+      Color: 255; 25; 0
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: true
+      Enabled: true
+      Head Length: 0.30000001192092896
+      Head Radius: 0.10000000149011612
+      Name: PoseWithCovariance
+      Shaft Length: 1
+      Shaft Radius: 0.05000000074505806
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pose/filtered
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -366,25 +404,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 31.913288116455078
+      Distance: 16.841659545898438
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.02328435704112053
-        Y: -1.9946731328964233
-        Z: 2.121295213699341
+        X: 3.6001179218292236
+        Y: -2.7787885665893555
+        Z: 2.117764472961426
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.22979775071144104
+      Pitch: 0.5897974967956543
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.948589563369751
+      Yaw: 4.8535895347595215
     Saved: ~
 Window Geometry:
   Displays:
@@ -405,4 +443,4 @@ Window Geometry:
     collapsed: false
   Width: 1370
   X: 550
-  Y: 67
+  Y: 66
