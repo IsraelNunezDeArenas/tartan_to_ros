@@ -35,3 +35,15 @@ ekf_filter_node:
          true,  true,  true]  # acc  → aceleraciones lineales (sin Z en 2D)
     imu0_remove_gravitational_acceleration: true  # ← CRÍTICO: usamos 'acc' crudo
     imu0_differential: false
+
+    # ── LOCALIZADOR ───────────────────────
+
+    pose0: /localizer/pose
+    pose0_config:
+      - [true,  true,  true,    # x, y, z
+         true,  true,  true,    # roll, pitch, yaw
+         false, false, false,
+         false, false, false,
+         false, false, false]
+    pose0_differential: false
+    pose0_rejection_threshold: 2.0
