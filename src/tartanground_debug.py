@@ -15,6 +15,7 @@ from std_msgs.msg import Header, Empty
 import time
 from sensor_msgs.msg import PointCloud2, PointField, Image, LaserScan, Imu  
 import sensor_msgs_py.point_cloud2 as pc2
+from scipy.spatial.transform import Rotation as R
 
 from rosgraph_msgs.msg import Clock
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
@@ -182,6 +183,7 @@ class TartanGroundTFPublisher(Node):
             f'Cargadas {len(self.cam_poses_ned)} poses de cámara desde:\n  {cam_path}')
 
 
+        self.n_before = 0.0
         # Poses Robot
 
         robot_path = os.path.join(self.dataset_path, 'imu','pos_global.txt')
@@ -609,31 +611,45 @@ class TartanGroundTFPublisher(Node):
 
     def _publish_localization_pose(self,idx,tstamp):
 
-
         pose_loc = self._pose_ned_to_pose_enu(self.robot_poses_ned[idx])
+
+        # convertir a rotación
+        r = R.from_quat(pose_loc[3:])
+
+        rng = np.random.default_rng(42)
+        noise = rng.normal(0, 0.05)
+
+        r_noise = R.from_euler('z', noise)
+        r_new = r_noise * r
+        q_noisy = r_new.as_quat()
+
+        new_pose_loc = [0.0] * 7
+
+        new_pose_loc[:3] = self.add_white_noise(pose_loc[:3],[0.2, 0.2, 1e-7])
+        new_pose_loc[3:] = q_noisy
 
         out = PoseWithCovarianceStamped()
         out.header.stamp    = tstamp
         out.header.frame_id = 'map'
         
         
-        out.pose.pose.position.x = pose_loc[0]
-        out.pose.pose.position.y = pose_loc[1]
-        out.pose.pose.position.z = pose_loc[2]
+        out.pose.pose.position.x = new_pose_loc[0]
+        out.pose.pose.position.y = new_pose_loc[1]
+        out.pose.pose.position.z = new_pose_loc[2]
 
-        out.pose.pose.orientation.x = pose_loc[3]
-        out.pose.pose.orientation.y = pose_loc[4]
-        out.pose.pose.orientation.z = pose_loc[5]
-        out.pose.pose.orientation.w = pose_loc[6]
+        out.pose.pose.orientation.x = new_pose_loc[3]
+        out.pose.pose.orientation.y = new_pose_loc[4]
+        out.pose.pose.orientation.z = new_pose_loc[5]
+        out.pose.pose.orientation.w = new_pose_loc[6]
 
         # Covarianza diagonal 6x6 - Aproximación 2D
         cov = np.zeros(36)
-        cov[0]  = 2.5e-3
-        cov[7]  = 2.5e-3
+        cov[0]  = 0.01
+        cov[7]  = 0.01
         cov[14] = 1e-7   
         cov[21] = 1e-7 
         cov[28] = 1e-7 
-        cov[35] = 2.5e-3  # var yaw
+        cov[35] = 0.01  # var yaw
         out.pose.covariance = cov.tolist()
 
         self.localizer_pub.publish(out)
@@ -698,6 +714,8 @@ class TartanGroundTFPublisher(Node):
 
         # ── Ruido ──────────────────────────────────────────────
 
+        ax,ay,az,wx,wy,wz = self.add_white_noise([ax,ay,az,wx,wy,wz], [0.5, 0.5, 0.001, 0.005, 0.005, 0.2],40)
+
         # ── IMU ───────────────────────────────────────────────────────────
         imu = Imu()
         imu.header.stamp    = tstamp
@@ -716,14 +734,16 @@ class TartanGroundTFPublisher(Node):
         imu.angular_velocity.y = wy
         imu.angular_velocity.z = wz
         imu.angular_velocity_covariance = [
-            0.005, 0.0,   0.0,
-            0.0,   0.005, 0.0,
-            0.0,   0.0,   0.005
+            0.01, 0.0,   0.0,
+            0.0,   0.01, 0.0,
+            0.0,   0.0,   0.01
         ]
 
         imu.orientation_covariance[0] = -1.0  # sin orientación desde IMU
 
         self.imu_pub.publish(imu)
+
+        vx,vy,vz,wx,wy,wz = self.add_white_noise([vx,vy,vz,wx,wy,wz], [0.5, 0.5, 0.001, 0.005, 0.005, 0.2],50)
 
         # ── Odometría (solo twist) ────────────────────────────────────────
         odom = Odometry()
@@ -802,7 +822,10 @@ class TartanGroundTFPublisher(Node):
 
             idx_cam = self.closest_map[frame]
 
-            self._publish_localization_pose(frame,now)
+            self.n_before = (self.n_before + 1) % 5
+
+            if self.n_before == 0:
+                self._publish_localization_pose(frame, now)
             
             self._publish_rgb(os.path.join(self.rgb_path, self.rgb_files[idx_cam]), now)
             self._publish_pointcloud_ENU(idx_cam,now)
