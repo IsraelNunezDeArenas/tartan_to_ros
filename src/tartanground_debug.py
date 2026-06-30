@@ -131,6 +131,12 @@ class TartanGroundTFPublisher(Node):
         self.declare_parameter('lidar_frame_GT','lidar_GT')
         self.declare_parameter('robot_file', 'pose_body.txt')
 
+        self.declare_parameter('topic_image_rgb', '/camera/rgb')
+        self.declare_parameter('topic_image_depth', '/camera/depth')
+        self.declare_parameter('topic_pose', 'pose_gt')
+
+        self.declare_parameter('n_frames_max', 50)
+
         self.dataset_path       = self.get_parameter('dataset_path').value
         self.rate_hz            = self.get_parameter('publish_rate').value
         self.loop               = self.get_parameter('loop').value
@@ -147,6 +153,12 @@ class TartanGroundTFPublisher(Node):
         cam_file                = self.get_parameter('camera_file').value
         robot_file              = self.get_parameter('robot_file').value
 
+        self.topic_image_rgb    = self.get_parameter('topic_image_rgb').value
+        self.topic_image_depth  = self.get_parameter('topic_image_depth').value
+        self.topic_pose         = self.get_parameter('topic_pose').value
+
+
+        self.n_frames_max       = self.get_parameter('n_frames_max').value
 
         self.rgb_path           = os.path.join(self.dataset_path, 'image_lcam_front')
         self.depth_path         = os.path.join(self.dataset_path, 'depth_lcam_front')
@@ -213,12 +225,12 @@ class TartanGroundTFPublisher(Node):
         self.static_tf_broadcaster = StaticTransformBroadcaster(self)
 
         # ── Publicadores de topics ───────────────────────────────────────────
-        self.robot_pose_pub  = self.create_publisher(PoseStamped, 'robot_pose', 10)
+        self.robot_pose_pub  = self.create_publisher(PoseWithCovarianceStamped, self.topic_pose, 10)
         self.camera_pose_pub = self.create_publisher(PoseStamped, 'camera_pose', 10)
 
         self.pointcloud_pub              = self.create_publisher(PointCloud2, '/pointcloud', 10)
-        self.rgb_pub          = self.create_publisher(Image, '/camera/rgb', 10)
-        self.depth_pub        = self.create_publisher(Image, '/camera/depth', 10)
+        self.rgb_pub          = self.create_publisher(Image, self.topic_image_rgb, 10)
+        self.depth_pub        = self.create_publisher(Image, self.topic_image_depth, 10)
         self.clock_pub        = self.create_publisher(Clock, '/clock', 10)
      
         self.imu_pub = self.create_publisher(Imu, '/imu/data_raw', 10)
@@ -570,6 +582,28 @@ class TartanGroundTFPublisher(Node):
         msg.header.frame_id = self.camera_frame_GT
         self.rgb_pub.publish(msg)
 
+    def _publish_depth(self, path: str, time_stamp: float):
+        # Leer la imagen depth igual que antes
+        depth_rgba = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        depth = depth_rgba.view("<f4")
+        depth = np.squeeze(depth, axis=-1)  # shape: (H, W), dtype: float32
+
+        # Construir el mensaje Image de ROS2
+        msg = Image()
+        msg.header = Header()
+        msg.header.stamp = time_stamp  
+        msg.header.frame_id = self.camera_frame_GT
+
+        msg.height = depth.shape[0]
+        msg.width = depth.shape[1]
+        msg.encoding = "32FC1"          # float32, 1 canal → estándar para depth
+        msg.is_bigendian = False
+        msg.step = depth.shape[1] * 4  # width * 4 bytes (float32)
+        msg.data = depth.tobytes()
+
+        self.depth_pub.publish(msg)
+
+
     def _load_robot_poses(self):
         """
         Carga robot_poses en NED. Solo se usa robot_poses[0] para /initialpose.
@@ -771,7 +805,7 @@ class TartanGroundTFPublisher(Node):
 
     def _timer_callback(self):
 
-        if self.current_frame >= self.total_frames:
+        if self.current_frame >= self.total_frames or self.current_frame >= self.n_frames_max:
             if self.loop:
                 self.current_frame = 0
                 if self.pub_path:
@@ -780,6 +814,7 @@ class TartanGroundTFPublisher(Node):
                 self.get_logger().info('↺ Reiniciando reproducción (loop=true).')
             else:
                 self.get_logger().info('✓ Reproducción finalizada.')
+                self.get_logger().info(f'Frames reproducidos {self.current_frame}')
                 self.timer.cancel()
                 return
 
@@ -815,8 +850,23 @@ class TartanGroundTFPublisher(Node):
 
         # ── Publicar PoseStamped ─────────────────────────────────────────────
         robot_ps  = self._make_pose_stamped(robot_tf_GT)
-        
-        self.robot_pose_pub.publish(robot_ps)
+
+        pose_msg = PoseWithCovarianceStamped()
+        pose_msg.header = robot_ps.header
+
+
+        # pose
+        pose_msg.pose.pose = robot_ps.pose
+        pose_msg.pose.covariance = [
+        0.1, 0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.1, 0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.1, 0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.2, 0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.2, 0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.2
+        ]
+
+        self.robot_pose_pub.publish(pose_msg)
 
         if self.current_frame in self.closest_map:
 
@@ -828,7 +878,8 @@ class TartanGroundTFPublisher(Node):
                 self._publish_localization_pose(frame, now)
             
             self._publish_rgb(os.path.join(self.rgb_path, self.rgb_files[idx_cam]), now)
-            self._publish_pointcloud_ENU(idx_cam,now)
+            self._publish_depth(os.path.join(self.depth_path, self.depth_files[idx_cam]), now)
+            # self._publish_pointcloud_ENU(idx_cam,now)
 
 
         self.current_frame += 1
