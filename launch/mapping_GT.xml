@@ -26,6 +26,7 @@
     <param name="topic_image_rgb" value="/camera/rgb"/>
     <param name="topic_image_depth" value="/camera/depth"/>
     <param name="topic_pose" value="/pose_gt"/>
+    <param name="use_gt" value="True"/>
 
     <param name="n_frames_max" value="150"/>
 
