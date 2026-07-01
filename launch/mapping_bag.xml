@@ -28,7 +28,7 @@
         <param name="topic_image_depth" value="/camera/depth"/>
         <param name="topic_pose" value="/pose_gt"/>
 
-        <param name="n_frames_max" value="150"/>
+        <param name="n_frames_max" value="1500"/>
         <param name="use_gt" value="False"/>
         <param name="time_wait" value="True"/>
  
