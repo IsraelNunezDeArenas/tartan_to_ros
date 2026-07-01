@@ -119,7 +119,7 @@
   <param from="$(find-pkg-share tartan_to_ros)/config/ekf_tartanground.yaml"/>
 
 </node>
-  <node pkg="tartan_to_ros"
+  <!-- <node pkg="tartan_to_ros"
         exec="map_tartanground.py"
         name="pcd_map_publisher"
         output="screen">
@@ -131,6 +131,6 @@
     <param name="z_max" value="0.8"/>
     <param name="padding" value="0.5"/>
     <param name="use_sim_time" value="true"/>
-  </node>
+  </node> -->
 
 </launch>
