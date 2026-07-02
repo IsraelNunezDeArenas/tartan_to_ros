@@ -138,6 +138,8 @@ class TartanGroundTFPublisher(Node):
         self.declare_parameter('use_GT',True)
         self.declare_parameter('time_wait',False)
 
+        self.declare_parameter('start_frame', 0)
+
         self.declare_parameter('n_frames_max', 50)
 
         self.dataset_path       = self.get_parameter('dataset_path').value
@@ -158,6 +160,9 @@ class TartanGroundTFPublisher(Node):
         self.n_frames_max       = self.get_parameter('n_frames_max').value
         self.use_gt             = self.get_parameter('use_GT').value
         self.time_wait          = self.get_parameter('time_wait').value
+
+        self.frame_start        = self.get_parameter('start_frame').value
+
 
         if self.use_gt: 
             self.robot_frame        = self.get_parameter('robot_frame').value
@@ -221,7 +226,7 @@ class TartanGroundTFPublisher(Node):
             self.robot_poses_ned = self.cam_poses_ned
 
         self.total_frames    = len(self.robot_poses_ned)
-        self.current_frame   = 0
+
 
         self._load_times()
         self._load_motion_data()
@@ -266,7 +271,13 @@ class TartanGroundTFPublisher(Node):
 
         # ── TF estático: map → odom (identidad) ─────────────────────────────
 
+        if self.frame_start >= self.n_frames_max:
+            self.get_logger().info(f'ERROR EN LOS LÍMITES : DEFAULTING')
+            self.frame_start = 0
+            self.n_frames_max = self.total_frames
 
+
+        self.current_frame = self.frame_start
  
         self.closest_times()
         self.closest_map = {imu: cam for imu, cam in self.closest_pairs}
@@ -320,6 +331,8 @@ class TartanGroundTFPublisher(Node):
 
         self.get_logger().info('Mapa recibido: Inciando repoducción')
 
+        self.get_logger().info(f'Iniciando en {self.frame_start}')
+
         if self.use_gt:
             self.get_logger().info('Usando Ground Truth')
             self.timer = self.create_timer(1.0 / (self.rate_hz), self._timer_callback_GT)
@@ -362,11 +375,13 @@ class TartanGroundTFPublisher(Node):
 
     def _publish_initial_pose(self):
 
-        p0_robot_enu = self._pose_ned_to_pose_enu(self.robot_poses_ned[0])
+        frame_start = self.frame_start
+
+        p0_robot_enu = self._pose_ned_to_pose_enu(self.robot_poses_ned[frame_start])
 
         msg = PoseWithCovarianceStamped()
 
-        msg.header.stamp = self._to_ros_time(0.0)
+        msg.header.stamp = self._to_ros_time(self.imu_times[frame_start])
         msg.header.frame_id = "map"   # 🔥 SIEMPRE "map"
 
         # ── Posición ──
