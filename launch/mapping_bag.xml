@@ -28,7 +28,8 @@
         <param name="topic_image_depth" value="/camera/depth"/>
         <param name="topic_pose" value="/pose_gt"/>
 
-        <param name="n_frames_max" value="1500"/>
+        <param name="n_frames_max" value="4170"/>
+        <param name="start_frame" value="3700"/>    <!--Office 3700 a 4170 -->
         <param name="use_gt" value="False"/>
         <param name="time_wait" value="True"/>
  

@@ -1,41 +1,5 @@
 <launch>
 
-    <node pkg="tartan_to_ros"
-        exec="tartanground_debug.py"
-        name="tartanground_debug"
-        output="screen"
-        launch-prefix="bash -c 'sleep 1; exec $0 $@'">
-
-        <param name="dataset_path" value="/home/ubuntu/Office/Data_omni/P0000"/>
-        <param name="publish_rate" value="10.0"/>
-        <param name="loop" value="false"/>
-
-        <param name="world_frame" value="map"/>
-        <param name="robot_frame" value="base_link"/>
-        <param name="robot_frame_GT" value="base_link"/>
-
-        <param name="camera_frame" value="camera"/>
-        <param name="camera_frame_GT" value="camera"/>
-
-        <param name="camera_file" value="pose_lcam_front.txt"/>
-
-        <param name="lidar_frame" value="lidar"/>
-        <param name="lidar_frame_GT" value="lidar_GT"/>
-
-        <param name="robot_file" value="pose_body.txt"/>
-
-        <param name="topic_image_rgb" value="/camera/rgb"/>
-        <param name="topic_image_depth" value="/camera/depth"/>
-        <param name="topic_pose" value="/pose_gt"/>
-
-        <param name="use_gt" value="True"/>
-
-        <param name="n_frames_max" value="4170"/>
-        <param name="start_frame" value="3700"/>  <!--Office 3700 a 4170 -->
-        <param name="time_wait" value="True"/>
-
-    </node>
-
     <node pkg="voxeland_robot_perception" exec="robot_perception_node.py" name="voxeland_perception_node">
 
 		<!-- Dataset Name -->

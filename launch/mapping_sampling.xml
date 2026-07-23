@@ -1,6 +1,6 @@
 <launch>
 
-    <node pkg="tartan_to_ros"
+    <!-- <node pkg="tartan_to_ros"
         exec="tartanground_debug.py"
         name="tartanground_debug"
         output="screen">
@@ -31,7 +31,13 @@
     <param name="use_gt" value="False"/>
     <param name="time_wait" value="True"/>
 
-    </node>
+    </node> -->
+<!-- 
+    <node pkg="voxeland_robot_perception" exec="bag_player_node.py" name="bag_player" launch-prefix="bash -c 'sleep 2; exec $0 $@'">
+
+		<param name="ruta_bag" value="/home/ubuntu/ros2_ws/Hospital_bag" />
+
+	</node> -->
 
     <node pkg="voxeland_robot_perception" exec="robot_perception_node.py" name="voxeland_perception_node">
 
@@ -76,7 +82,6 @@
 		<!-- Output configuration -->
 		<param name="pointcloud_type" value="XYZRGB"/>					# Possible values: "XYZ", "XYZRGB" and "XYZSemantics"
 		<param name="topic_pointcloud_output" value="/pose_to_sample" />
-        <param name="use_sim_time" value="true"/>
 
 	</node>
 
@@ -112,16 +117,13 @@
 
 		<!-- SemanticBonxai Parameters-->
 		<param name="semantics_as_instances" value="true" />
-        <param name="use_sim_time" value="true"/>
 
 	</node>
 
-    <node pkg="tartan_to_ros"
+    <!-- <node pkg="tartan_to_ros"
         exec="odom_to_pose.py"
         name="odom_to_pose"
         output="screen">
-
-        <param name="use_sim_time" value="true"/>
 
         </node>
 
@@ -133,7 +135,7 @@
       respawn="true">
   <param from="$(find-pkg-share tartan_to_ros)/config/ekf_tartanground.yaml"/>
 
-</node>
+</node> -->
   <!-- <node pkg="tartan_to_ros"
         exec="map_tartanground.py"
         name="pcd_map_publisher"
