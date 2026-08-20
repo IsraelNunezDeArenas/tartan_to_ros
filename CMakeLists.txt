@@ -20,7 +20,7 @@ find_package(cv_bridge REQUIRED)
 install(
   PROGRAMS
     src/map_tartanground.py
-    src/tartanground_debug.py
+    src/tartanground_player.py
     src/odom_to_pose.py
   DESTINATION lib/${PROJECT_NAME}
 )

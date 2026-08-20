@@ -11,7 +11,7 @@
 
     <!-- Dataset -->
     <param name="dataset_path"
-           value="/home/israel/tartanairpy/House/Data_omni/P0000"/>
+           value="/home/ubuntu/tartanairpy/House/Data_omni/P0000"/>
 
     <!-- Tópicos -->
     <param name="topic_rgb_image"    value="/camera/rgb"/>
@@ -57,7 +57,7 @@
         launch-prefix="bash -c 'sleep 8; $0 $@'">
 
     <param name="pcd_path"
-           value="/home/israel/tartanairpy/House/House_rgb.pcd"/>
+           value="/home/ubuntu/tartanairpy/House/House_rgb.pcd"/>
     <param name="topic_map"    value="/map"/>
     <param name="map_frame_id" value="map"/>
     <param name="resolution"   value="0.02"/>
@@ -70,13 +70,8 @@
 
   </node>
 
-<!-- ================================================================ -->
-<!--  NODO 3 — PcdMapPublisher                                        -->
-<!-- ================================================================ -->
-  
-
   <!-- ================================================================ -->
-  <!--  NODO 6 — EKF                                                  -->
+  <!--  NODO 3 — EKF                                                  -->
   <!-- ================================================================ -->
 
 
@@ -89,14 +84,8 @@
 </node>
 
 
-
-<!-- <node pkg="tf2_ros"
-      exec="static_transform_publisher"
-      name="map_to_odom_tf"
-      args="0 0 0 0 0 0 map odom" /> -->
-
   <!-- ================================================================ -->
-  <!--  NODO 6 — RViz2                                                  -->
+  <!--  NODO 4 — RViz2                                                  -->
   <!-- ================================================================ -->
   <node pkg="rviz2"
         exec="rviz2"

@@ -140,7 +140,7 @@ class TartanGroundTFPublisher(Node):
 
         self.declare_parameter('start_frame', 0)
 
-        self.declare_parameter('n_frames_max', 50)
+        self.declare_parameter('end_frame', 50)
 
         self.dataset_path       = self.get_parameter('dataset_path').value
         self.rate_hz            = self.get_parameter('publish_rate').value
@@ -157,7 +157,7 @@ class TartanGroundTFPublisher(Node):
         self.topic_pose         = self.get_parameter('topic_pose').value
 
 
-        self.n_frames_max       = self.get_parameter('n_frames_max').value
+        self.end_frame       = self.get_parameter('end_frame').value
         self.use_gt             = self.get_parameter('use_GT').value
         self.time_wait          = self.get_parameter('time_wait').value
 
@@ -192,7 +192,7 @@ class TartanGroundTFPublisher(Node):
 
         self.bridge = CvBridge()
 
-        # ── Cargar poses ────────────────────────────────────────────────────
+        # ── Loading poses ────────────────────────────────────────────────────
 
         # Poses Cámara
 
@@ -202,27 +202,26 @@ class TartanGroundTFPublisher(Node):
             cam_path = os.path.join(self.dataset_path, cam_file)
 
         if not os.path.isfile(cam_path):
-            self.get_logger().fatal(f'No se encontró el archivo de poses de cámara: {cam_path}')
+            self.get_logger().fatal(f'Camera pose file not found {cam_path}')
             raise SystemExit(1)
 
         self.cam_poses_ned = load_cam_pose(cam_path)
         self.get_logger().info(
-            f'Cargadas {len(self.cam_poses_ned)} poses de cámara desde:\n  {cam_path}')
+            f'Loaded {len(self.cam_poses_ned)} camera poses from:\n  {cam_path}')
 
 
         self.n_before = 0.0
-        # Poses Robot
 
         robot_path = os.path.join(self.dataset_path, 'imu','pos_global.txt')
 
         if os.path.isfile(robot_path):
             self._load_robot_poses()
             self.get_logger().info(
-                f'Cargadas {len(self.robot_poses_ned)} poses de robot desde:\n  {robot_path}')
+                f'Loaded {len(self.robot_poses_ned)} robot poses from:\n  {robot_path}')
         else:
             self.get_logger().warn(
-                f'Archivo de pose del robot no encontrado: {robot_path}\n'
-                '→ Se usará la pose de cámara también para el robot.')
+                f'Robot pose file not found: {robot_path}\n'
+                '→ Using camera pose')
             self.robot_poses_ned = self.cam_poses_ned
 
         self.total_frames    = len(self.robot_poses_ned)
@@ -232,14 +231,14 @@ class TartanGroundTFPublisher(Node):
         self._load_motion_data()
 
         self.get_logger().info(
-            f'Total de frames a reproducir: {self.total_frames}  |  '
-            f'Frecuencia: {10*self.rate_hz} Hz  |  Loop: {self.loop}')
+            f'Total frames: {self.total_frames}  |  '
+            f'Frecuency: {10*self.rate_hz} Hz  |  Loop: {self.loop}')
 
-        # ── Publicadores TF ─────────────────────────────────────────────────
+        # ── TF Publishers ─────────────────────────────────────────────────
         self.tf_broadcaster        = TransformBroadcaster(self)
         self.static_tf_broadcaster = StaticTransformBroadcaster(self)
 
-        # ── Publicadores de topics ───────────────────────────────────────────
+        # ── Topics ───────────────────────────────────────────
         self.robot_pose_pub  = self.create_publisher(PoseWithCovarianceStamped, self.topic_pose, 10)
         self.camera_pose_pub = self.create_publisher(PoseStamped, 'camera_pose', 10)
 
@@ -265,16 +264,14 @@ class TartanGroundTFPublisher(Node):
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
 
         self.localizer_pub = self.create_publisher(PoseWithCovarianceStamped, '/localizer/pose', 10)
-
-        # En __init__, añadir el publicador:
         self.set_pose_pub = self.create_publisher(PoseWithCovarianceStamped, '/set_pose', 10)
 
         # ── TF estático: map → odom (identidad) ─────────────────────────────
 
-        if self.frame_start >= self.n_frames_max:
-            self.get_logger().info(f'ERROR EN LOS LÍMITES : DEFAULTING')
+        if self.frame_start >= self.end_frame:
+            self.get_logger().info(f'Start - End Error : DEFAULTING')
             self.frame_start = 0
-            self.n_frames_max = self.total_frames
+            self.end_frame = self.total_frames
 
 
         self.current_frame = self.frame_start
@@ -285,14 +282,14 @@ class TartanGroundTFPublisher(Node):
         self._publish_extrinsics()
 
 
-        self.get_logger().info('✓ Nodo TartanGround TF Publisher iniciado.')
-        self.get_logger().info(f'  Marcos TF: NED → {self.robot_frame} → {self.camera_frame}')
-        self.get_logger().info('Esperando mapa / Esperando Tiempo')
+        self.get_logger().info('✓  TartanGround Publisher Node start.')
+        self.get_logger().info(f'  Frames TF: NED → {self.robot_frame} → {self.camera_frame}')
+        self.get_logger().info('Waiting start signal (time/map)')
 
 
-        if self.time_wait:
+        if not self.time_wait:
             self.map_received_cb(Empty)
-        
+               
     # -----------------------------------------------------------------------
 
     def _publish_map_to_odom_at_p0(self):
@@ -322,26 +319,25 @@ class TartanGroundTFPublisher(Node):
         self.static_tf_broadcaster.sendTransform([ts_map_odom, ts_odom_bl])
         self.get_logger().info(
             f'✓ map→odom en p0: x={p0[0]:.3f}  y={p0[1]:.3f}  '
-            f'| odom→base_link identidad (placeholder EKF)')
+            f'| odom→base_link identity (placeholder EKF)')
 
 
     def map_received_cb(self,msg):
 
         self._publish_initial_pose()    
 
-        self.get_logger().info('Mapa recibido: Inciando repoducción')
+        self.get_logger().info('Mapa recieved: Starting replay')
 
-        self.get_logger().info(f'Iniciando en {self.frame_start}')
+        self.get_logger().info(f'Frame start: {self.frame_start}')
 
         if self.use_gt:
-            self.get_logger().info('Usando Ground Truth')
+            self.get_logger().info('Using Ground Truth')
             self.timer = self.create_timer(1.0 / (self.rate_hz), self._timer_callback_GT)
         else: 
             self.timer = self.create_timer(1.0 / (self.rate_hz), self._timer_callback)
         return
 
     def _publish_static_identity(self, child: str, parent: str):
-        """Publica una transformación estática identidad."""
         ts = TransformStamped()
         ts.header.stamp    = self._to_ros_time(0.0)
         ts.header.frame_id = parent
@@ -352,7 +348,7 @@ class TartanGroundTFPublisher(Node):
 
     def _publish_extrinsics(self):
 
-        self.get_logger().info(f"Tf inicial publicandose") 
+        self.get_logger().info(f"Initial TF publishing") 
 
         p0_cam_enu  = self._pose_ned_to_pose_enu(self.cam_poses_ned[0])
         p0_robot_enu = self._pose_ned_to_pose_enu(self.robot_poses_ned[0])  
@@ -425,9 +421,7 @@ class TartanGroundTFPublisher(Node):
 
 
     def _pose_ned_to_tf_enu(self, pose_ned: tuple, parent: str, child: str) -> TransformStamped:
-        """
-        Convierte una pose NED (tx,ty,tz,qx,qy,qz,qw) en un TransformStamped ENU.
-        """
+
         tx_n, ty_n, tz_n, qx_n, qy_n, qz_n, qw_n = pose_ned
 
         # Conversión de posición NED → ENU
@@ -455,7 +449,6 @@ class TartanGroundTFPublisher(Node):
     # -----------------------------------------------------------------------
 
     def _make_pose_stamped(self, tf_msg: TransformStamped) -> PoseStamped:
-        """Convierte un TransformStamped a PoseStamped para visualización."""
         ps = PoseStamped()
         ps.header = tf_msg.header
         ps.pose.position.x = tf_msg.transform.translation.x
@@ -507,8 +500,8 @@ class TartanGroundTFPublisher(Node):
             f'{base}/acc_nograv.npy', f'{base}/acc_nograv.txt')
 
         self.get_logger().info(
-            f"Cargados {len(self.vel_body)} pasos de vel_body + gyro "
-            f"(GT derivado, usado como odometría).")
+            f"{len(self.vel_body)} steps loaded"
+            f"(GT-obtained, usado como odometría).")
 
     def _to_ros_time(self, t: float) -> Time:
         return Time(sec=int(t), nanosec=int((t % 1) * 1e9))
@@ -521,15 +514,9 @@ class TartanGroundTFPublisher(Node):
            raise FileNotFoundError(f"No se encontró: {npy} ni {txt}")
 
     def pose_to_matrix(self,pose:tuple):
-        """
-        Convierte una pose (x, y, z, qx, qy, qz, qw) en una matriz 4x4.
-
-        :param pose: tupla/lista de 7 elementos
-        :return: np.array 4x4
-        """
 
         if len(pose) != 7:
-            raise ValueError("La pose debe tener 7 elementos (x, y, z, qx, qy, qz, qw)")
+            raise ValueError("Pose must contain 7 elements (x, y, z, qx, qy, qz, qw)")
 
         x, y, z, qx, qy, qz, qw = pose
 
@@ -608,7 +595,7 @@ class TartanGroundTFPublisher(Node):
     def _publish_rgb(self, path: str, time_stamp: float):
         img = cv2.imread(path)
         if img is None:
-            self.get_logger().warn(f"RGB no leído: {path}")
+            self.get_logger().warn(f"RGB not loadsd: {path}")
             return
         msg = self.bridge.cv2_to_imgmsg(img, encoding='bgr8')
         msg.header.stamp    = time_stamp
@@ -638,9 +625,7 @@ class TartanGroundTFPublisher(Node):
 
 
     def _load_robot_poses(self):
-        """
-        Carga robot_poses en NED. Solo se usa robot_poses[0] para /initialpose.
-        """
+
         base = os.path.join(self.dataset_path, 'imu')
         pos  = self._load(f'{base}/pos_global.npy', f'{base}/pos_global.txt')
         ori  = self._load(f'{base}/ori_global.npy', f'{base}/ori_global.txt')
@@ -657,17 +642,7 @@ class TartanGroundTFPublisher(Node):
         self.robot_poses_ned = np.hstack((pos, np.stack((qx, qy, qz, qw), axis=1)))
 
     def add_white_noise(self, data, std, seed=42):
-        """
-        Añade ruido blanco gaussiano reproducible a un vector.
 
-        Args:
-            data (list or np.ndarray): señal original
-            std (float or list): desviación estándar del ruido
-            seed (int): semilla para reproducibilidad
-
-        Returns:
-            np.ndarray: señal con ruido
-        """
         rng = np.random.default_rng(seed)
 
         data = np.array(data)
@@ -762,8 +737,8 @@ class TartanGroundTFPublisher(Node):
     def _publish_odom(self, tstamp, idx):
 
         # ── Rotación al frame base_link (Rz -90° sobre ENU) ──────────────
-        #   base_link X (rojo) = Norte = ENU Y  →  vx_bl =  vy_enu
-        #   base_link Y (verde) = Oeste = -ENU X →  vy_bl = -vx_enu
+        #   base_link X (red) = North = ENU Y  →  vx_bl =  vy_enu
+        #   base_link Y (gree) = West = -ENU X →  vy_bl = -vx_enu
         def enu_to_baselink(ex, ey, ez):
             return ey, -ex, ez
 
@@ -838,23 +813,22 @@ class TartanGroundTFPublisher(Node):
 
     def _timer_callback_GT(self):
 
-        if self.current_frame >= self.total_frames or self.current_frame >= self.n_frames_max:
+        if self.current_frame >= self.total_frames or self.current_frame >= self.end_frame:
             if self.loop:
                 self.current_frame = 0
                 if self.pub_path:
                     self.robot_path_msg.poses.clear()
                     self.camera_path_msg.poses.clear()
-                self.get_logger().info('↺ Reiniciando reproducción (loop=true).')
+                self.get_logger().info('↺ Restarting (loop=true).')
             else:
-                self.get_logger().info('✓ Reproducción finalizada.')
-                self.get_logger().info(f'Frames reproducidos {self.current_frame}')
+                self.get_logger().info('✓ Replay finished.')
+                self.get_logger().info(f'Frames played {self.current_frame}')
                 self.timer.cancel()
                 return
 
         tf_lst = []
 
         now = self._to_ros_time(self.imu_times[self.current_frame])
-        # now = self.get_clock().now().to_msg()
 
         msg_clock = Clock()
         msg_clock.clock = now
@@ -912,30 +886,29 @@ class TartanGroundTFPublisher(Node):
             
             self._publish_rgb(os.path.join(self.rgb_path, self.rgb_files[idx_cam]), now)
             self._publish_depth(os.path.join(self.depth_path, self.depth_files[idx_cam]), now)
-            # self._publish_pointcloud_ENU(idx_cam,now)
+            # self._publish_pointcloud_ENU(idx_cam,now) --- UNCOMMENT FOR LIDAR POINTCLOUD
 
 
         self.current_frame += 1
 
     def _timer_callback(self):
     
-            if self.current_frame >= self.total_frames or self.current_frame >= self.n_frames_max:
+            if self.current_frame >= self.total_frames or self.current_frame >= self.end_frame:
                 if self.loop:
                     self.current_frame = 0
                     if self.pub_path:
                         self.robot_path_msg.poses.clear()
                         self.camera_path_msg.poses.clear()
-                    self.get_logger().info('↺ Reiniciando reproducción (loop=true).')
+                    self.get_logger().info('↺ Restarting (loop=true).')
                 else:
-                    self.get_logger().info('✓ Reproducción finalizada.')
-                    self.get_logger().info(f'Frames reproducidos {self.current_frame}')
+                    self.get_logger().info('✓ Replay finished.')
+                    self.get_logger().info(f'Frames played {self.current_frame}')
                     self.timer.cancel()
                     return
     
             tf_lst = []
     
             now = self._to_ros_time(self.imu_times[self.current_frame])
-            # now = self.get_clock().now().to_msg()
     
             msg_clock = Clock()
             msg_clock.clock = now
@@ -943,44 +916,15 @@ class TartanGroundTFPublisher(Node):
     
             frame = self.current_frame
     
-            # ── Robot: NED → ENU ────────────────────────────────────────────────
-            # robot_tf_GT = self._pose_ned_to_tf_enu(
-            #     self.robot_poses_ned[frame],
-            #     parent=self.world_frame,
-            #     child=self.robot_frame_GT,
-            # )
-            
-            # robot_tf_GT.header.stamp = now
-    
-            # tf_lst.append(robot_tf_GT)
-    
             # --- Tiempo ---
             t = self.imu_times[frame]
     
             # ── Broadcast TF ────────────────────────────────────────────────────
-            # self.tf_broadcaster.sendTransform(tf_lst)
+
     
             self._publish_odom(now,frame)
     
             # ── Publicar PoseStamped ─────────────────────────────────────────────
-            # robot_ps  = self._make_pose_stamped(robot_tf_GT)
-    
-            # pose_msg = PoseWithCovarianceStamped()
-            # pose_msg.header = robot_ps.header
-    
-    
-            # # pose
-            # pose_msg.pose.pose = robot_ps.pose
-            # pose_msg.pose.covariance = [
-            # 0.1, 0.0,   0.0,   0.0,   0.0,   0.0,
-            # 0.0,   0.1, 0.0,   0.0,   0.0,   0.0,
-            # 0.0,   0.0,   0.1, 0.0,   0.0,   0.0,
-            # 0.0,   0.0,   0.0,   0.2, 0.0,   0.0,
-            # 0.0,   0.0,   0.0,   0.0,   0.2, 0.0,
-            # 0.0,   0.0,   0.0,   0.0,   0.0,   0.2
-            # ]
-    
-            # self.robot_pose_pub.publish(pose_msg)
     
             if self.current_frame in self.closest_map:
             
@@ -993,7 +937,7 @@ class TartanGroundTFPublisher(Node):
                 
                 self._publish_rgb(os.path.join(self.rgb_path, self.rgb_files[idx_cam]), now)
                 self._publish_depth(os.path.join(self.depth_path, self.depth_files[idx_cam]), now)
-                # self._publish_pointcloud_ENU(idx_cam,now)
+                # self._publish_pointcloud_ENU(idx_cam,now) --- UNCOMMENT FOR LIDAR CLOUD
     
     
             self.current_frame += 1

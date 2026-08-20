@@ -3,7 +3,7 @@
 <package format="3">
   <name>tartan_to_ros</name>
   <version>0.0.0</version>
-  <description>Publishes TartanAir dataset (RGB, depth, LiDAR) as ROS 2 topics</description>
+  <description>Publishes TartanGround dataset (RGB, depth, LiDAR) as ROS 2 topics</description>
   <maintainer email="0619966850@uma.es">israelnunez</maintainer>
   <license>Apache-2.0</license>
 
